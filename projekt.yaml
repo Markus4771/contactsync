@@ -1,0 +1,39 @@
+schema: itpz/v1
+
+id: contactsync
+name: ContactSync Professional
+version: 3.2.09
+type: deb
+channel: stable
+
+category: Kommunikation
+description: Synchronisiert Kontakte zwischen 3CX, Nextcloud CardDAV, Zammad und Odoo.
+homepage: https://github.com/Markus4771/contactsync
+
+package:
+  name: contactsync-professional
+  asset: contactsync-professional_3.2.09_all.deb
+  sha256_asset: contactsync-professional_3.2.09_all.deb.sha256
+
+source:
+  provider: github
+  repository: Markus4771/contactsync
+
+install:
+  service: contactsync-professional.service
+
+health:
+  type: http
+  url: http://127.0.0.1:8080/health
+
+permissions:
+  - network
+  - filesystem-read
+  - filesystem-write
+  - database-read
+  - database-write
+  - systemd
+
+metadata:
+  maintainer: Markus4771
+  documentation: README.md
