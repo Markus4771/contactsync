@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+APP_DIR=/opt/contactsync-professional
+DATA_DIR=/var/lib/contactsync-professional
+USER=contactsync
+getent group "$USER" >/dev/null 2>&1 || addgroup --system "$USER"
+getent passwd "$USER" >/dev/null 2>&1 || adduser --system --ingroup "$USER" --home "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin "$USER"
+install -d -m 0750 -o "$USER" -g "$USER" "$DATA_DIR"
+[ -x "$APP_DIR/venv/bin/python" ] || python3 -m venv "$APP_DIR/venv"
+"$APP_DIR/venv/bin/pip" install --disable-pip-version-check --upgrade pip
+"$APP_DIR/venv/bin/pip" install --disable-pip-version-check "$APP_DIR"
+systemctl daemon-reload
+systemctl enable contactsync-professional.service >/dev/null 2>&1 || true
+systemctl restart contactsync-professional.service
+exit 0
