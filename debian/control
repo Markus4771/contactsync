@@ -1,0 +1,10 @@
+Package: contactsync-professional
+Version: 3.3.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.11), python3-venv, python3-pip, adduser, systemd
+Maintainer: Markus4771
+Description: Modulare Kontakt-Synchronisationsplattform
+ ContactSync Professional verwaltet Connectoren und Synchronisationsaufträge
+ für Nextcloud, Zammad, Odoo, 3CX und weitere Verzeichnisdienste.
