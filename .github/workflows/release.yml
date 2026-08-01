@@ -1,0 +1,66 @@
+name: ContactSync Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Version prüfen
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(tr -d '[:space:]' < version.txt)
+          test "$VERSION" = "3.2.09"
+          test -f projekt.yaml
+
+      - name: Debian-Paket bauen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x scripts/build_deb.sh ]; then
+            ./scripts/build_deb.sh
+          elif [ -x build_deb.sh ]; then
+            ./build_deb.sh
+          else
+            echo "Es fehlt noch ein Buildskript für ContactSync." >&2
+            exit 1
+          fi
+
+      - name: Release-Dateien prüfen
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE=dist/contactsync-professional_3.2.09_all.deb
+          test -s "$PACKAGE"
+          dpkg-deb -f "$PACKAGE" Package Version Architecture
+          sha256sum "$PACKAGE" > "$PACKAGE.sha256"
+          sha256sum -c "$PACKAGE.sha256"
+
+      - name: Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            TAG="v$(tr -d '[:space:]' < version.txt)"
+            git tag -f "$TAG"
+            git push origin "refs/tags/$TAG" --force
+          fi
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "ContactSync $(cat version.txt)" --notes "Automatisch erzeugtes Debian-Release für die IT-Projektzentrale."
+          gh release upload "$TAG" \
+            dist/contactsync-professional_3.2.09_all.deb \
+            dist/contactsync-professional_3.2.09_all.deb.sha256 \
+            --clobber
