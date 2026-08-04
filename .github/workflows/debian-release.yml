@@ -1,0 +1,43 @@
+name: Debian-Paket
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python-Code prüfen
+        run: python3 -m compileall -q contactsync
+      - name: Debian-Paket bauen
+        run: |
+          chmod +x scripts/build_deb.sh
+          ./scripts/build_deb.sh
+      - name: Paket prüfen
+        run: |
+          dpkg-deb --info dist/contactsync-professional_*_all.deb
+          sha256sum -c dist/contactsync-professional_*_all.deb.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contactsync-debian
+          path: |
+            dist/*.deb
+            dist/*.sha256
+      - name: GitHub-Release veröffentlichen
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v3.3.0' }}
+          name: ContactSync Professional 3.3.0
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            dist/*.deb
+            dist/*.sha256
