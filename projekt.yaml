@@ -4,24 +4,32 @@ name: ContactSync Professional
 version: 3.3.0
 type: deb
 channel: stable
-description: Modulare Kontakt- und Verzeichniszentrale mit FastAPI, SQLite und Weboberfläche.
+
 category: Kommunikation
+description: Modulare Kontakt- und Verzeichniszentrale mit FastAPI, SQLite und Weboberfläche.
 homepage: https://github.com/Markus4771/contactsync
+
 package:
   name: contactsync-professional
   asset: contactsync-professional_3.3.0_all.deb
   sha256_asset: contactsync-professional_3.3.0_all.deb.sha256
+
 source:
   provider: github
   repository: Markus4771/contactsync
+
 install:
   service: contactsync-professional.service
   package_manager: apt
   rollback: previous-package
+
 health:
+  type: http
   url: http://127.0.0.1:8000/health
   timeout_seconds: 60
+
 dependencies: []
+
 permissions:
   - network
   - filesystem-read
@@ -29,6 +37,8 @@ permissions:
   - database-read
   - database-write
   - systemd
+
 metadata:
   maintainer: Markus4771
+  documentation: README.md
   port: 8000
