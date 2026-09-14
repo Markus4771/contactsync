@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.4.9
+
+- RMM-Gerätebestand mit Hostname, IP, MAC, Betriebssystem, Seriennummer, Agentstatus und letztem Kontakt ergänzt.
+- Geräte werden über die Kundennummer dem zentralen ContactSync-Kundenstamm zugeordnet.
+- Geräteereignisse `device.new`, `device.offline` und `device.customer_changed` ergänzt und an die Automatisierungsschicht angebunden.
+- REST-API für Geräteimport, Suche, Detailansicht und GLPI-Asset-Verknüpfung ergänzt.
+- NetLock RMM als sechstes integriertes Connector-Plugin registriert.
+- NetLock-Transport bleibt bis zur Verifikation der tatsächlich eingesetzten API-Endpunkte bewusst deaktiviert.
+- Release-, Debian-Paket- und Regressionstests auf 3.4.9 erweitert.
+
+## 3.4.8
+
+- Beschaffungsbrücke für externe Bestellautomatisierungen ergänzt.
+- Beschaffungsanforderungen mit Status, Kunde, Lieferant, Artikel, Menge, Preis und externer Bestell-ID eingeführt.
+- Automationsereignisse für angelegte, freigegebene, bestellte, empfangene und stornierte Beschaffungen ergänzt.
+- CLI für Beschaffungsanforderungen und Statusänderungen ergänzt.
+- CI auf Python 3.11 und 3.12 abgesichert und Debian-Paketprüfung erweitert.
+- GitHub-Releases werden nur noch tag-gesteuert und dynamisch anhand von `version.txt` erzeugt.
+
 ## 3.4.7
 
 - GLPI als fünften integrierten Connector-Plugin ergänzt.
