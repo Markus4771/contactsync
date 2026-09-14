@@ -92,10 +92,20 @@ class GLPIRuntimePlugin(ConnectorPlugin):
         except Exception as exc:
             return ConnectionTestResult(False, f"GLPI Verbindung fehlgeschlagen: {exc}")
 
+    @staticmethod
+    def _customer_number(record: dict[str, Any]) -> Any:
+        if record.get("customer_number"):
+            return record.get("customer_number")
+        comment = str(record.get("comment") or "")
+        first_line = comment.splitlines()[0] if comment else ""
+        if first_line.lower().startswith("kundennummer:"):
+            return first_line.split(":", 1)[1].strip() or None
+        return None
+
     def normalize_customer(self, record: dict[str, Any]) -> dict[str, Any]:
         return {
             "external_id": str(record["id"]) if record.get("id") is not None else None,
-            "customer_number": record.get("customer_number") or record.get("comment") if record.get("comment") else None,
+            "customer_number": self._customer_number(record),
             "name": record.get("name") or record.get("completename") or "GLPI Entity",
             "notes": record.get("comment"),
             "status": "active",

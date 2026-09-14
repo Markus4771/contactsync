@@ -6,18 +6,22 @@ from contactsync.plugins import PluginManager
 def test_builtin_connector_plugins_are_discovered():
     manager = PluginManager()
     definitions = manager.definitions()
-    assert {"odoo", "zammad", "3cx", "nextcloud"} <= set(definitions)
+    assert {"odoo", "zammad", "3cx", "nextcloud", "glpi"} <= set(definitions)
     assert definitions["odoo"]["plugin_version"] == "1.2.0"
     for key in ("zammad", "3cx", "nextcloud"):
         assert definitions[key]["plugin"] is True
         assert definitions[key]["plugin_version"] == "1.2.0"
         assert definitions[key]["required_config"]
+    assert definitions["glpi"]["plugin"] is True
+    assert definitions["glpi"]["plugin_version"] == "1.0.0"
+    assert definitions["glpi"]["required_config"] == ["url", "user_token"]
 
 
 def test_plugins_publish_automation_events():
     manager = PluginManager()
     assert "customer.updated" in manager.get("odoo").metadata.automation_events
     assert "person.updated" in manager.get("3cx").metadata.automation_events
+    assert "customer.created" in manager.get("glpi").metadata.automation_events
 
 
 def test_plugin_keys_are_unique():
@@ -31,6 +35,7 @@ def test_required_configuration_is_validated():
     assert manager.get("odoo").validate_config({})
     assert manager.get("zammad").validate_config({"url": "https://zammad.example", "token": "abc"}) == []
     assert manager.get("nextcloud").validate_config({"url": "https://cloud.example"})
+    assert manager.get("glpi").validate_config({"url": "https://glpi.example", "user_token": "abc"}) == []
 
 
 def test_connector_normalization_for_core_customer_fields():
@@ -186,3 +191,33 @@ async def test_nextcloud_write_uses_uid(monkeypatch):
     result = await plugin.update_person({}, "person-42", {"first_name": "Max", "last_name": "Mustermann", "email": "max@example.invalid"})
     assert result.external_id == "person-42"
     assert "UID:person-42" in calls[0][1]
+
+
+def test_glpi_normalizes_entities_and_users():
+    plugin = PluginManager().get("glpi")
+    customer = plugin.normalize_customer({"id": 12, "name": "Kunde GLPI", "comment": "Kundennummer: K-12", "date_mod": "2026-09-14 12:00:00"})
+    person = plugin.normalize_person({"id": 21, "default_entities_id": 12, "firstname": "Max", "realname": "Muster", "email": "max@example.invalid"})
+    assert customer["external_id"] == "12"
+    assert customer["name"] == "Kunde GLPI"
+    assert person["external_customer_id"] == "12"
+    assert person["first_name"] == "Max"
+
+
+@pytest.mark.asyncio
+async def test_glpi_writes_entities_and_users(monkeypatch):
+    plugin = PluginManager().get("glpi")
+    calls = []
+
+    async def fake_request(config, method, path, *, params=None, json_body=None):
+        calls.append((method, path, json_body))
+        return {"id": 77}
+
+    monkeypatch.setattr(plugin, "_request", fake_request)
+    customer = await plugin.create_customer({}, {"name": "Neu GmbH", "customer_number": "K-77"})
+    person = await plugin.create_person({}, {"first_name": "Max", "last_name": "Muster", "email": "max@example.invalid", "customer_external_id": "77"})
+    assert customer.external_id == "77"
+    assert person.external_id == "77"
+    assert calls[0][1] == "/Entity"
+    assert calls[0][2]["input"]["comment"].startswith("Kundennummer: K-77")
+    assert calls[1][1] == "/User"
+    assert calls[1][2]["input"]["default_entities_id"] == 77
