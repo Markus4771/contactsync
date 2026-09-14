@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.4.6
+
+- Separaten Automatisierungs-Worker als systemd-Dienst ergänzt.
+- SQLite-basierte Event-Queue für Kunden-, Ansprechpartner- und Sync-Ereignisse eingeführt.
+- Webhook-Ziele für externe Automatisierungen wie n8n ergänzt.
+- Zeitgesteuerte Synchronisationspläne mit konfigurierbarem Intervall eingeführt.
+- Synchronisationswarteschlange wird durch den Worker automatisch verarbeitet.
+- Sync-Links speichern Quell- und Ziel-IDs für spätere Aktualisierungen statt doppelter Neuanlagen.
+- Retry-Logik mit exponentiellem Backoff und Fehlerprotokoll ergänzt.
+- Kunden- und Ansprechpartneränderungen erzeugen automatisch Events über SQLite-Trigger.
+- Debian-Paket installiert, aktiviert und startet den neuen Automatisierungsdienst.
+- IT-Projektzentrale-Manifest und Paketversion vollständig auf 3.4.6 aktualisiert.
+- Tests für Automatisierungsschema, Event-Erzeugung, Scheduler, Webhook-Konfiguration und Retry ergänzt.
+
 ## 3.4.5
 
 - Zammad-Connector produktiv über REST-API angebunden.

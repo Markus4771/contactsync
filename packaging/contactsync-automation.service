@@ -1,0 +1,17 @@
+[Unit]
+Description=ContactSync Automation Worker
+After=contactsync-professional.service network-online.target
+
+[Service]
+Type=simple
+User=contactsync
+Group=contactsync
+WorkingDirectory=/opt/contactsync-professional
+Environment=CONTACTSYNC_DATA_DIR=/var/lib/contactsync-professional
+Environment=CONTACTSYNC_DB=/var/lib/contactsync-professional/contactsync.db
+ExecStart=/opt/contactsync-professional/venv/bin/python -m contactsync.automation_service
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

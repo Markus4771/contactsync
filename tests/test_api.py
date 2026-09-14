@@ -17,7 +17,7 @@ def test_health():
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["version"] == "3.4.5"
+    assert response.json()["version"] == "3.4.6"
     assert response.json()["plugins"] == 4
 
 

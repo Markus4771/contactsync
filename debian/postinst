@@ -11,5 +11,7 @@ install -d -m 0750 -o "$USER" -g "$USER" "$DATA_DIR"
 "$APP_DIR/venv/bin/pip" install --disable-pip-version-check "$APP_DIR"
 systemctl daemon-reload
 systemctl enable contactsync-professional.service >/dev/null 2>&1 || true
+systemctl enable contactsync-automation.service >/dev/null 2>&1 || true
 systemctl restart contactsync-professional.service
+systemctl restart contactsync-automation.service
 exit 0
