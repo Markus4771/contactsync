@@ -1,4 +1,7 @@
+import pytest
+
 from contactsync.plugins import PluginManager
+from contactsync.plugins.contracts import PluginOperationNotImplemented
 
 
 def test_builtin_connector_plugins_are_discovered():
@@ -59,3 +62,28 @@ def test_connector_normalization_for_persons():
     assert person["last_name"] == "Mustermann"
     assert person["email"] == "max@example.invalid"
     assert person["external_id"] == "42"
+
+
+def test_all_plugins_expose_same_sync_operations():
+    manager = PluginManager()
+    expected = {
+        "test_connection",
+        "fetch_customers",
+        "fetch_persons",
+        "create_customer",
+        "update_customer",
+        "create_person",
+        "update_person",
+    }
+    for plugin in manager.all():
+        definition = plugin.definition()
+        assert set(definition["operations"]) == expected
+        for operation in expected:
+            assert callable(getattr(plugin, operation))
+
+
+@pytest.mark.asyncio
+async def test_unimplemented_provider_operation_is_explicit():
+    plugin = PluginManager().get("odoo")
+    with pytest.raises(PluginOperationNotImplemented):
+        await plugin.test_connection({})
