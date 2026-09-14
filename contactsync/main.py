@@ -13,21 +13,19 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from contactsync import __version__
+from contactsync.plugins.manager import get_plugin_manager
 
 DATA_DIR = Path(os.getenv("CONTACTSYNC_DATA_DIR", "/var/lib/contactsync-professional"))
 DB_PATH = Path(os.getenv("CONTACTSYNC_DB", str(DATA_DIR / "contactsync.db")))
 
-CONNECTOR_DEFINITIONS = {
-    "nextcloud": {"title": "Nextcloud CardDAV", "capabilities": ["contacts.read", "contacts.write", "delta"]},
-    "zammad": {"title": "Zammad", "capabilities": ["organizations.read", "users.read", "contacts.write"]},
-    "odoo": {"title": "Odoo", "capabilities": ["partners.read", "partners.write", "delta"]},
-    "3cx": {"title": "3CX", "capabilities": ["users.read", "phonebook.write"]},
-    "microsoft365": {"title": "Microsoft 365", "capabilities": ["contacts.read", "contacts.write", "delta"]},
-    "ldap": {"title": "LDAP", "capabilities": ["directory.read", "directory.write"]},
-    "mailcow": {"title": "Mailcow", "capabilities": ["mailboxes.read", "aliases.read"]},
-    "csv": {"title": "CSV", "capabilities": ["contacts.read", "contacts.write"]},
-    "vcard": {"title": "vCard", "capabilities": ["contacts.read", "contacts.write"]},
-}
+
+def connector_definitions() -> dict[str, dict[str, Any]]:
+    return get_plugin_manager().definitions()
+
+
+def connector_keys() -> tuple[str, ...]:
+    return tuple(connector_definitions())
+
 
 CUSTOMER_FIELDS = [
     "customer_number", "name", "customer_type", "email", "phone", "mobile", "street",
@@ -270,7 +268,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_persons_email ON contact_persons(email);
             """
         )
-        for key in CONNECTOR_DEFINITIONS:
+        for key in connector_keys():
             connection.execute("INSERT OR IGNORE INTO connectors(key) VALUES (?)", (key,))
         migrate_legacy_contacts(connection)
 
@@ -284,57 +282,90 @@ def startup() -> None:
 def health() -> dict[str, Any]:
     with db() as connection:
         connection.execute("SELECT 1").fetchone()
-    return {"status": "ok", "version": __version__, "database": str(DB_PATH)}
+    return {"status": "ok", "version": __version__, "database": str(DB_PATH), "plugins": len(connector_keys())}
 
 
 @app.get("/api/v1/connectors")
 def connectors() -> list[dict[str, Any]]:
+    definitions = connector_definitions()
     with db() as connection:
         rows = {row["key"]: row for row in connection.execute("SELECT * FROM connectors")}
     result = []
-    for key, definition in CONNECTOR_DEFINITIONS.items():
-        row = rows[key]
+    for key, definition in definitions.items():
+        row = rows.get(key)
+        if row is None:
+            enabled = False
+            config: dict[str, Any] = {}
+            status = "not_configured"
+            last_checked_at = None
+        else:
+            enabled = bool(row["enabled"])
+            config = json.loads(row["config_json"])
+            status = row["last_status"]
+            last_checked_at = row["last_checked_at"]
         result.append({
             "key": key,
             **definition,
-            "enabled": bool(row["enabled"]),
-            "configured": json.loads(row["config_json"]) != {},
-            "status": row["last_status"],
-            "last_checked_at": row["last_checked_at"],
+            "enabled": enabled,
+            "configured": not get_plugin_manager().get(key).validate_config(config),
+            "status": status,
+            "last_checked_at": last_checked_at,
         })
     return result
 
 
 @app.patch("/api/v1/connectors/{connector_key}")
 def update_connector(connector_key: str, payload: ConnectorUpdate) -> dict[str, Any]:
-    if connector_key not in CONNECTOR_DEFINITIONS:
-        raise HTTPException(404, "Connector nicht gefunden")
+    manager = get_plugin_manager()
+    definitions = manager.definitions()
+    if connector_key not in definitions:
+        raise HTTPException(404, "Connector-Plugin nicht gefunden")
+    plugin = manager.get(connector_key)
     with db() as connection:
         current = connection.execute("SELECT * FROM connectors WHERE key = ?", (connector_key,)).fetchone()
+        if current is None:
+            connection.execute("INSERT INTO connectors(key) VALUES (?)", (connector_key,))
+            current = connection.execute("SELECT * FROM connectors WHERE key = ?", (connector_key,)).fetchone()
         enabled = int(payload.enabled) if payload.enabled is not None else current["enabled"]
         config = payload.config if payload.config is not None else json.loads(current["config_json"])
-        status = "ready" if enabled and config else "not_configured"
+        errors = plugin.validate_config(config)
+        status = "ready" if enabled and not errors else ("invalid_config" if enabled and errors else "not_configured")
         checked = now_iso()
         connection.execute(
             "UPDATE connectors SET enabled=?, config_json=?, last_status=?, last_checked_at=? WHERE key=?",
             (enabled, json.dumps(config), status, checked, connector_key),
         )
-    return {"key": connector_key, "enabled": bool(enabled), "status": status}
+    return {
+        "key": connector_key,
+        "enabled": bool(enabled),
+        "status": status,
+        "config_errors": errors,
+        "plugin_version": plugin.metadata.version,
+    }
 
 
 @app.post("/api/v1/sync", status_code=202)
 def start_sync(payload: SyncRequest) -> dict[str, Any]:
-    if payload.source not in CONNECTOR_DEFINITIONS or payload.target not in CONNECTOR_DEFINITIONS:
-        raise HTTPException(400, "Quelle oder Ziel ist unbekannt")
+    manager = get_plugin_manager()
+    definitions = manager.definitions()
+    if payload.source not in definitions or payload.target not in definitions:
+        raise HTTPException(400, "Quelle oder Ziel ist kein registriertes Connector-Plugin")
     if payload.source == payload.target:
         raise HTTPException(400, "Quelle und Ziel müssen verschieden sein")
+    source_plugin = manager.get(payload.source)
+    target_plugin = manager.get(payload.target)
     with db() as connection:
         cursor = connection.execute(
             "INSERT INTO sync_runs(source,target,mode,status,created_at) VALUES (?,?,?,?,?)",
             (payload.source, payload.target, payload.mode, "queued", now_iso()),
         )
         run_id = cursor.lastrowid
-    return {"run_id": run_id, "status": "queued"}
+    return {
+        "run_id": run_id,
+        "status": "queued",
+        "source_plugin_version": source_plugin.metadata.version,
+        "target_plugin_version": target_plugin.metadata.version,
+    }
 
 
 @app.get("/api/v1/sync-runs")
@@ -477,6 +508,8 @@ def delete_person(person_id: int) -> None:
 
 @app.get("/api/v1/field-mappings")
 def list_field_mappings(connector: str | None = None, entity_type: str | None = None) -> list[dict[str, Any]]:
+    if connector and connector not in connector_definitions():
+        raise HTTPException(400, "Unbekanntes Connector-Plugin")
     sql = "SELECT * FROM field_mappings WHERE 1=1"
     params: list[Any] = []
     if connector:
@@ -492,8 +525,8 @@ def list_field_mappings(connector: str | None = None, entity_type: str | None = 
 
 @app.put("/api/v1/field-mappings")
 def upsert_field_mapping(payload: MappingPayload) -> dict[str, Any]:
-    if payload.connector not in CONNECTOR_DEFINITIONS:
-        raise HTTPException(400, "Unbekannter Connector")
+    if payload.connector not in connector_definitions():
+        raise HTTPException(400, "Unbekanntes Connector-Plugin")
     valid_targets = CUSTOMER_FIELDS if payload.entity_type == "customer" else PERSON_FIELDS
     if payload.target_field not in valid_targets:
         raise HTTPException(400, "Ungültiges Zielfeld")
@@ -516,10 +549,17 @@ def upsert_field_mapping(payload: MappingPayload) -> dict[str, Any]:
 
 @app.get("/api/v1/dashboard")
 def dashboard_data() -> dict[str, Any]:
+    keys = connector_keys()
     with db() as connection:
         customers_count = connection.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
         persons_count = connection.execute("SELECT COUNT(*) FROM contact_persons").fetchone()[0]
-        connector_count = connection.execute("SELECT COUNT(*) FROM connectors WHERE enabled=1").fetchone()[0]
+        if keys:
+            placeholders = ",".join("?" for _ in keys)
+            connector_count = connection.execute(
+                f"SELECT COUNT(*) FROM connectors WHERE enabled=1 AND key IN ({placeholders})", keys
+            ).fetchone()[0]
+        else:
+            connector_count = 0
         queued_count = connection.execute("SELECT COUNT(*) FROM sync_runs WHERE status='queued'").fetchone()[0]
         latest = [dict(row) for row in connection.execute("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 5")]
     return {
@@ -528,6 +568,7 @@ def dashboard_data() -> dict[str, Any]:
         "contacts": customers_count + persons_count,
         "persons": persons_count,
         "active_connectors": connector_count,
+        "registered_plugins": len(keys),
         "queued_runs": queued_count,
         "latest_runs": latest,
     }
@@ -550,7 +591,8 @@ document.getElementById('newCustomer').addEventListener('submit',async e=>{{e.pr
 
 @app.get("/mappings", response_class=HTMLResponse)
 def mappings_page() -> str:
-    return f"""<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Feldmapping · ContactSync</title><style>body{{font-family:system-ui;margin:0;background:#f3f5f7;color:#17202a}}header{{background:#17202a;color:#fff;padding:20px 5vw}}main{{padding:24px 5vw}}.card{{background:#fff;border-radius:12px;padding:18px;box-shadow:0 2px 12px #0001}}input,select,button{{padding:9px;margin:4px}}table{{width:100%;border-collapse:collapse}}th,td{{padding:9px;border-bottom:1px solid #ddd;text-align:left}}</style></head><body><header><h1>Feldmapping</h1><div>ContactSync Professional {__version__}</div></header><main><div class='card'><p><a href='/'>Dashboard</a> · <a href='/customers'>Kundenstamm</a></p><form id='map'><select name='connector'>{''.join(f"<option value='{k}'>{v['title']}</option>" for k,v in CONNECTOR_DEFINITIONS.items())}</select><select name='entity_type'><option value='customer'>Kunde</option><option value='person'>Ansprechpartner</option></select><input name='source_field' placeholder='Quellfeld' required><input name='target_field' placeholder='Zielfeld, z. B. customer_number' required><button>Speichern</button></form><table><thead><tr><th>Connector</th><th>Typ</th><th>Quellfeld</th><th>Zielfeld</th><th>Aktiv</th></tr></thead><tbody id='rows'></tbody></table></div><script>async function load(){{const r=await fetch('/api/v1/field-mappings');const d=await r.json();rows.innerHTML=d.map(x=>`<tr><td>${{x.connector}}</td><td>${{x.entity_type}}</td><td>${{x.source_field}}</td><td>${{x.target_field}}</td><td>${{x.enabled?'Ja':'Nein'}}</td></tr>`).join('')}}map.addEventListener('submit',async e=>{{e.preventDefault();const p=Object.fromEntries(new FormData(e.target).entries());p.enabled=true;const r=await fetch('/api/v1/field-mappings',{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(p)}});if(r.ok){{e.target.reset();load()}}else alert((await r.json()).detail)}});load();</script></main></body></html>"""
+    definitions = connector_definitions()
+    return f"""<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Feldmapping · ContactSync</title><style>body{{font-family:system-ui;margin:0;background:#f3f5f7;color:#17202a}}header{{background:#17202a;color:#fff;padding:20px 5vw}}main{{padding:24px 5vw}}.card{{background:#fff;border-radius:12px;padding:18px;box-shadow:0 2px 12px #0001}}input,select,button{{padding:9px;margin:4px}}table{{width:100%;border-collapse:collapse}}th,td{{padding:9px;border-bottom:1px solid #ddd;text-align:left}}</style></head><body><header><h1>Feldmapping</h1><div>ContactSync Professional {__version__}</div></header><main><div class='card'><p><a href='/'>Dashboard</a> · <a href='/customers'>Kundenstamm</a></p><form id='map'><select name='connector'>{''.join(f"<option value='{k}'>{v['title']}</option>" for k,v in definitions.items())}</select><select name='entity_type'><option value='customer'>Kunde</option><option value='person'>Ansprechpartner</option></select><input name='source_field' placeholder='Quellfeld' required><input name='target_field' placeholder='Zielfeld, z. B. customer_number' required><button>Speichern</button></form><table><thead><tr><th>Connector</th><th>Typ</th><th>Quellfeld</th><th>Zielfeld</th><th>Aktiv</th></tr></thead><tbody id='rows'></tbody></table></div><script>async function load(){{const r=await fetch('/api/v1/field-mappings');const d=await r.json();rows.innerHTML=d.map(x=>`<tr><td>${{x.connector}}</td><td>${{x.entity_type}}</td><td>${{x.source_field}}</td><td>${{x.target_field}}</td><td>${{x.enabled?'Ja':'Nein'}}</td></tr>`).join('')}}map.addEventListener('submit',async e=>{{e.preventDefault();const p=Object.fromEntries(new FormData(e.target).entries());p.enabled=true;const r=await fetch('/api/v1/field-mappings',{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(p)}});if(r.ok){{e.target.reset();load()}}else alert((await r.json()).detail)}});load();</script></main></body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
