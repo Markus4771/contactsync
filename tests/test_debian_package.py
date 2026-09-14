@@ -7,9 +7,11 @@ def test_debian_release_contract():
     assert (ROOT / "projekt.yaml").is_file()
     assert (ROOT / "scripts/build_deb.sh").is_file()
     assert (ROOT / "debian/postinst").is_file()
+    assert (ROOT / "packaging/contactsync-automation.service").is_file()
     manifest = (ROOT / "projekt.yaml").read_text(encoding="utf-8")
-    assert "version: 3.4.5" in manifest
-    assert "contactsync-professional_3.4.5_all.deb" in manifest
+    assert "version: 3.4.6" in manifest
+    assert "contactsync-professional_3.4.6_all.deb" in manifest
+    assert "automation_worker: systemd" in manifest
     assert "connector_registry: plugin-manager" in manifest
     assert "plugin_interface: async-v1" in manifest
     assert "odoo_transport: json-rpc" in manifest
@@ -19,3 +21,4 @@ def test_debian_release_contract():
     build = (ROOT / "scripts/build_deb.sh").read_text(encoding="utf-8")
     assert "dpkg-deb --root-owner-group --build" in build
     assert "sha256sum" in build
+    assert "contactsync-automation.service" in build
