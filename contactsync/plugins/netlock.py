@@ -21,6 +21,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
         description="RMM-Geräte, Agentstatus und Kundenzuordnung für ContactSync.",
         automation_events=("device.new", "device.offline", "device.customer_changed"),
         required_config=("url", "api_token"),
+        category="rmm",
     )
 
     def __init__(self) -> None:
