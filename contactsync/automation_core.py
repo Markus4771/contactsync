@@ -107,6 +107,26 @@ def init_schema() -> None:
         ensure_column(connection, "sync_runs", "attempts", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(connection, "sync_runs", "next_attempt_at", "TEXT")
         ensure_column(connection, "sync_runs", "last_error", "TEXT")
+        connection.executescript(
+            """
+            CREATE TRIGGER IF NOT EXISTS cs_customer_created AFTER INSERT ON customers BEGIN
+              INSERT INTO automation_events(event_type,entity_type,entity_id,payload_json,status,created_at)
+              VALUES('customer.created','customer',NEW.id,json_object('id',NEW.id,'customer_number',NEW.customer_number,'name',NEW.name,'email',NEW.email),'queued',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            END;
+            CREATE TRIGGER IF NOT EXISTS cs_customer_updated AFTER UPDATE ON customers BEGIN
+              INSERT INTO automation_events(event_type,entity_type,entity_id,payload_json,status,created_at)
+              VALUES('customer.updated','customer',NEW.id,json_object('id',NEW.id,'customer_number',NEW.customer_number,'name',NEW.name,'email',NEW.email),'queued',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            END;
+            CREATE TRIGGER IF NOT EXISTS cs_person_created AFTER INSERT ON contact_persons BEGIN
+              INSERT INTO automation_events(event_type,entity_type,entity_id,payload_json,status,created_at)
+              VALUES('person.created','person',NEW.id,json_object('id',NEW.id,'customer_id',NEW.customer_id,'first_name',NEW.first_name,'last_name',NEW.last_name,'email',NEW.email),'queued',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            END;
+            CREATE TRIGGER IF NOT EXISTS cs_person_updated AFTER UPDATE ON contact_persons BEGIN
+              INSERT INTO automation_events(event_type,entity_type,entity_id,payload_json,status,created_at)
+              VALUES('person.updated','person',NEW.id,json_object('id',NEW.id,'customer_id',NEW.customer_id,'first_name',NEW.first_name,'last_name',NEW.last_name,'email',NEW.email),'queued',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            END;
+            """
+        )
 
 
 def emit_event(event_type: str, entity_type: str, entity_id: int | None, payload: dict) -> int:
