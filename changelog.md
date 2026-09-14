@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.4.3
+
+- Einheitliche asynchrone Plugin-Schnittstelle für alle Connectoren eingeführt.
+- Standardoperationen: `test_connection`, `fetch_customers`, `fetch_persons`, `create_customer`, `update_customer`, `create_person`, `update_person`.
+- Gemeinsame Ergebnisverträge für Verbindungstests und Schreiboperationen ergänzt.
+- Noch nicht providerseitig angebundene Operationen liefern einen klar unterscheidbaren `PluginOperationNotImplemented`-Fehler.
+- Connector-Metadaten veröffentlichen die verfügbaren Standardoperationen über das Plugin-Registry.
+- Tests stellen sicher, dass Odoo, Zammad, 3CX und Nextcloud denselben Schnittstellenvertrag erfüllen.
+- IT-Projektzentrale-Manifest kennzeichnet die Schnittstelle als `async-v1`.
+
 ## 3.4.2
 
 - Synchronisations-Core vollständig auf den zentralen `PluginManager` umgestellt.
