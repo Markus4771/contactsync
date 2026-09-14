@@ -7,9 +7,21 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from contactsync.plugins.manager import get_plugin_manager
 from contactsync.rmm_core import init_rmm_schema, now_iso, upsert_device
 
-router = APIRouter(prefix="/api/v1/devices", tags=["devices"])
+router = APIRouter(prefix="/api/v1", tags=["devices"])
+
+CUSTOMER_TARGET_FIELDS = {
+    "customer_number", "name", "customer_type", "email", "phone", "mobile", "street",
+    "postal_code", "city", "country", "website", "vat_id", "tax_number", "debtor_number",
+    "industry", "status", "source", "tags", "notes", "assigned_technician", "contract_type",
+    "contract_start", "contract_end",
+}
+PERSON_TARGET_FIELDS = {
+    "first_name", "last_name", "email", "phone", "mobile", "function", "department",
+    "is_primary", "status", "source", "external_id",
+}
 
 
 class DeviceImport(BaseModel):
@@ -31,6 +43,14 @@ class DeviceImport(BaseModel):
 
 class GLPILink(BaseModel):
     glpi_asset_id: str
+
+
+class FieldMappingPayload(BaseModel):
+    connector: str
+    entity_type: str = Field(pattern="^(customer|person)$")
+    source_field: str
+    target_field: str
+    enabled: bool = True
 
 
 def _db() -> sqlite3.Connection:
@@ -63,7 +83,7 @@ def _emit_device_events(connection: sqlite3.Connection, device_id: int, events: 
             pass
 
 
-@router.get("")
+@router.get("/devices")
 def list_devices(customer_number: str | None = None, online_status: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
     sql = "SELECT d.*, c.name AS customer_name FROM managed_devices d LEFT JOIN customers c ON c.id=d.customer_id WHERE 1=1"
     params: list[Any] = []
@@ -82,7 +102,7 @@ def list_devices(customer_number: str | None = None, online_status: str | None =
         return [dict(row) for row in connection.execute(sql, params)]
 
 
-@router.get("/{device_id}")
+@router.get("/devices/{device_id}")
 def get_device(device_id: int) -> dict[str, Any]:
     with _db() as connection:
         device = dict(_device_or_404(connection, device_id))
@@ -92,7 +112,7 @@ def get_device(device_id: int) -> dict[str, Any]:
         return device
 
 
-@router.post("/import", status_code=201)
+@router.post("/devices/import", status_code=201)
 def import_device(payload: DeviceImport) -> dict[str, Any]:
     data = payload.model_dump()
     data["raw_json"] = json.dumps(data, ensure_ascii=False)
@@ -107,7 +127,7 @@ def import_device(payload: DeviceImport) -> dict[str, Any]:
         return {"device": dict(_device_or_404(connection, device_id)), "events": events}
 
 
-@router.patch("/{device_id}/glpi")
+@router.patch("/devices/{device_id}/glpi")
 def link_glpi_asset(device_id: int, payload: GLPILink) -> dict[str, Any]:
     with _db() as connection:
         _device_or_404(connection, device_id)
@@ -119,7 +139,7 @@ def link_glpi_asset(device_id: int, payload: GLPILink) -> dict[str, Any]:
         return dict(_device_or_404(connection, device_id))
 
 
-@router.delete("/{device_id}/glpi")
+@router.delete("/devices/{device_id}/glpi")
 def unlink_glpi_asset(device_id: int) -> dict[str, Any]:
     with _db() as connection:
         _device_or_404(connection, device_id)
@@ -128,3 +148,40 @@ def unlink_glpi_asset(device_id: int) -> dict[str, Any]:
         )
         connection.commit()
         return dict(_device_or_404(connection, device_id))
+
+
+@router.get("/field-mappings")
+def list_field_mappings(connector: str | None = None, entity_type: str | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM field_mappings WHERE 1=1"
+    params: list[Any] = []
+    if connector:
+        sql += " AND connector=?"
+        params.append(connector)
+    if entity_type:
+        sql += " AND entity_type=?"
+        params.append(entity_type)
+    sql += " ORDER BY connector,entity_type,source_field"
+    with _db() as connection:
+        return [dict(row) for row in connection.execute(sql, params)]
+
+
+@router.put("/field-mappings")
+def put_field_mapping(payload: FieldMappingPayload) -> dict[str, Any]:
+    manager = get_plugin_manager()
+    if payload.connector not in manager.definitions():
+        raise HTTPException(400, "Unbekanntes Connector-Plugin")
+    allowed = CUSTOMER_TARGET_FIELDS if payload.entity_type == "customer" else PERSON_TARGET_FIELDS
+    if payload.target_field not in allowed:
+        raise HTTPException(400, "Ungültiges Zielfeld")
+    with _db() as connection:
+        connection.execute(
+            "INSERT INTO field_mappings(connector,entity_type,source_field,target_field,enabled) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(connector,entity_type,source_field) DO UPDATE SET target_field=excluded.target_field,enabled=excluded.enabled",
+            (payload.connector, payload.entity_type, payload.source_field, payload.target_field, int(payload.enabled)),
+        )
+        connection.commit()
+        row = connection.execute(
+            "SELECT * FROM field_mappings WHERE connector=? AND entity_type=? AND source_field=?",
+            (payload.connector, payload.entity_type, payload.source_field),
+        ).fetchone()
+        return dict(row)
