@@ -17,15 +17,33 @@ def test_health():
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["version"] == "3.4.1"
+    assert response.json()["version"] == "3.4.2"
+    assert response.json()["plugins"] == 4
 
 
-def test_connectors_are_registered():
+def test_connectors_are_plugin_managed():
     with TestClient(app) as client:
         response = client.get("/api/v1/connectors")
     assert response.status_code == 200
-    keys = {item["key"] for item in response.json()}
-    assert {"nextcloud", "zammad", "odoo", "3cx", "microsoft365", "ldap", "mailcow", "csv", "vcard"} <= keys
+    items = response.json()
+    keys = {item["key"] for item in items}
+    assert keys == {"nextcloud", "zammad", "odoo", "3cx"}
+    assert all(item["plugin"] is True for item in items)
+    assert all("plugin_version" in item for item in items)
+
+
+def test_connector_config_is_validated_by_plugin():
+    with TestClient(app) as client:
+        response = client.patch("/api/v1/connectors/odoo", json={"enabled": True, "config": {}})
+    assert response.status_code == 200
+    assert response.json()["status"] == "invalid_config"
+    assert response.json()["config_errors"]
+
+
+def test_unknown_connector_plugin_is_rejected():
+    with TestClient(app) as client:
+        response = client.patch("/api/v1/connectors/legacy", json={"enabled": True, "config": {}})
+    assert response.status_code == 404
 
 
 def test_queue_sync_run():
@@ -33,6 +51,14 @@ def test_queue_sync_run():
         response = client.post("/api/v1/sync", json={"source": "nextcloud", "target": "odoo", "mode": "delta"})
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
+    assert response.json()["source_plugin_version"]
+    assert response.json()["target_plugin_version"]
+
+
+def test_unknown_sync_plugin_is_rejected():
+    with TestClient(app) as client:
+        response = client.post("/api/v1/sync", json={"source": "legacy", "target": "odoo", "mode": "delta"})
+    assert response.status_code == 400
 
 
 def test_customer_and_person_crud():
@@ -60,3 +86,9 @@ def test_field_mapping():
         mappings = client.get("/api/v1/field-mappings?connector=odoo&entity_type=customer")
         assert mappings.status_code == 200
         assert any(item["source_field"] == "ref" for item in mappings.json())
+
+
+def test_field_mapping_rejects_unknown_plugin():
+    with TestClient(app) as client:
+        response = client.put("/api/v1/field-mappings", json={"connector": "legacy", "entity_type": "customer", "source_field": "ref", "target_field": "customer_number", "enabled": True})
+    assert response.status_code == 400

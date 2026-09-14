@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.4.2
+
+- Synchronisations-Core vollständig auf den zentralen `PluginManager` umgestellt.
+- Connectoren werden nicht mehr aus einer fest eingebauten Liste geladen.
+- Odoo, Zammad, 3CX und Nextcloud werden dynamisch aus dem Plugin-Registry bereitgestellt.
+- Connector-Konfiguration wird über die jeweilige Plugin-Validierung geprüft.
+- Synchronisationsaufträge akzeptieren nur registrierte Connector-Plugins.
+- Feldmapping validiert Connectoren gegen das Plugin-Registry.
+- Dashboard zählt nur tatsächlich registrierte und aktive Connector-Plugins.
+- Health-Check zeigt die Anzahl registrierter Plugins an.
+- IT-Projektzentrale-Manifest kennzeichnet den PluginManager als Connector-Registry.
+
+## 3.4.1
+
+- Connector-Plugin-Framework mit Odoo, Zammad, 3CX und Nextcloud vertieft.
+- Pflichtkonfiguration und Connector-spezifische Normalisierung ergänzt.
+
 ## 3.3.1
 
 - Erweiterter Kundenstamm mit eindeutiger Kundennummer.
