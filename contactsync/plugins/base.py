@@ -16,6 +16,7 @@ class PluginMetadata:
     description: str = ""
     automation_events: tuple[str, ...] = field(default_factory=tuple)
     required_config: tuple[str, ...] = field(default_factory=tuple)
+    category: str = "directory"
 
 
 class ConnectorPlugin(ABC):
@@ -35,6 +36,8 @@ class ConnectorPlugin(ABC):
         return {
             "title": self.metadata.title,
             "plugin_version": self.metadata.version,
+            "category": self.metadata.category,
+            "contact_sync": self.supports_contact_sync(),
             "capabilities": list(self.metadata.capabilities),
             "description": self.metadata.description,
             "automation_events": list(self.metadata.automation_events),
@@ -53,6 +56,9 @@ class ConnectorPlugin(ABC):
 
     def supports(self, capability: str) -> bool:
         return capability in self.metadata.capabilities
+
+    def supports_contact_sync(self) -> bool:
+        return self.metadata.category == "directory"
 
     def normalize_customer(self, record: dict[str, Any]) -> dict[str, Any]:
         return dict(record)
