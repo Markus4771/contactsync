@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contactsync-professional"
-version = "3.4.5"
+version = "3.4.6"
 description = "Modulare Kontakt-Synchronisationsplattform"
 requires-python = ">=3.11"
 dependencies = [
@@ -20,6 +20,7 @@ test = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 contactsync-professional = "contactsync.main:run"
+contactsync-automation = "contactsync.automation_service:main"
 
 [tool.setuptools.packages.find]
 include = ["contactsync*"]
