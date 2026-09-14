@@ -17,8 +17,8 @@ def test_health():
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["version"] == "3.4.8"
-    assert response.json()["plugins"] == 5
+    assert response.json()["version"] == "3.4.9"
+    assert response.json()["plugins"] == 6
 
 
 def test_connectors_are_plugin_managed():
@@ -27,7 +27,7 @@ def test_connectors_are_plugin_managed():
     assert response.status_code == 200
     items = response.json()
     keys = {item["key"] for item in items}
-    assert keys == {"nextcloud", "zammad", "odoo", "3cx", "glpi"}
+    assert keys == {"nextcloud", "zammad", "odoo", "3cx", "glpi", "netlock"}
     assert all(item["plugin"] is True for item in items)
     assert all("plugin_version" in item for item in items)
     assert all("operations" in item for item in items)
@@ -93,3 +93,15 @@ def test_field_mapping_rejects_unknown_plugin():
     with TestClient(app) as client:
         response = client.put("/api/v1/field-mappings", json={"connector": "legacy", "entity_type": "customer", "source_field": "ref", "target_field": "customer_number", "enabled": True})
     assert response.status_code == 400
+
+
+def test_device_import_and_glpi_link():
+    with TestClient(app) as client:
+        customer = client.post("/api/v1/customers", json={"customer_number": "RMM-100", "name": "RMM Testkunde"})
+        assert customer.status_code in {201, 409}
+        imported = client.post("/api/v1/devices/import", json={"source": "netlock", "external_id": "device-100", "customer_number": "RMM-100", "hostname": "RMM-PC-100", "online_status": "offline"})
+        assert imported.status_code == 201
+        device_id = imported.json()["device"]["id"]
+        linked = client.patch(f"/api/v1/devices/{device_id}/glpi", json={"glpi_asset_id": "Computer:100"})
+        assert linked.status_code == 200
+        assert linked.json()["glpi_asset_id"] == "Computer:100"
