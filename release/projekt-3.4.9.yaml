@@ -1,0 +1,61 @@
+schema: itpz/v1
+id: contactsync-professional
+name: ContactSync Professional
+version: 3.4.9
+type: deb
+channel: stable
+description: Modulare Kontakt- und Verzeichniszentrale mit Plugin-Architektur fuer zentrale Kunden-, Ansprechpartner- und Geraetedaten.
+category: Kommunikation
+homepage: https://github.com/Markus4771/contactsync
+package:
+  name: contactsync-professional
+  asset: contactsync-professional_3.4.9_all.deb
+  sha256_asset: contactsync-professional_3.4.9_all.deb.sha256
+source:
+  provider: github
+  repository: Markus4771/contactsync
+install:
+  service: contactsync-professional.service
+  package_manager: apt
+  rollback: previous-package
+health:
+  url: http://127.0.0.1:8000/health
+  timeout_seconds: 60
+dependencies: []
+permissions:
+  - network
+  - filesystem-read
+  - filesystem-write
+  - database-read
+  - database-write
+  - systemd
+metadata:
+  maintainer: Markus4771
+  port: 8000
+  architecture: core-plus-connector-plugins
+  role: master-data-hub
+  automation: true
+  automation_worker: systemd
+  event_queue: sqlite
+  webhook_transport: http-json
+  retry_strategy: exponential
+  procurement_bridge: cli-events
+  procurement_events: true
+  rmm_devices: true
+  rmm_device_events: true
+  glpi_asset_link: true
+  netlock_transport: pending-verification
+  connector_registry: plugin-manager
+  plugin_interface: async-v1
+  odoo_transport: json-rpc
+  zammad_transport: rest
+  nextcloud_transport: carddav
+  threecx_transport: xapi
+  glpi_transport: rest
+  connector_plugins:
+    - odoo
+    - zammad
+    - 3cx
+    - nextcloud
+    - glpi
+    - netlock
