@@ -12,7 +12,7 @@ class ZammadRuntimePlugin(ZammadPlugin):
     metadata = ZammadPlugin.metadata.__class__(
         key="zammad",
         title="Zammad",
-        version="1.3.0",
+        version="1.2.0",
         capabilities=("organizations.read", "users.read", "contacts.write", "tickets.write", "delta"),
         description="Zammad Connector fuer Organisationen, Benutzer und Monitoring-Tickets",
         automation_events=("customer.created", "customer.updated", "person.updated"),
