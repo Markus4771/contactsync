@@ -13,6 +13,7 @@ BUILTIN_PLUGINS = (
     "contactsync.plugins.nextcloud_runtime:NextcloudRuntimePlugin",
     "contactsync.plugins.glpi_runtime:GLPIRuntimePlugin",
     "contactsync.plugins.netlock:NetLockRMMPlugin",
+    "contactsync.plugins.checkmk_plugin:CheckmkPlugin",
 )
 
 
@@ -51,7 +52,26 @@ class PluginManager:
         return list(self._plugins.values())
 
     def definitions(self) -> dict[str, dict]:
-        return {plugin.metadata.key: plugin.definition() for plugin in self.all()}
+        result: dict[str, dict] = {}
+        for plugin in self.all():
+            definition = plugin.definition()
+            if not plugin.supports_contact_sync():
+                specialized = list(definition.get("operations", []))
+                if specialized != list(ConnectorPlugin.SYNC_OPERATIONS):
+                    definition["specialized_operations"] = specialized
+                definition["operations"] = list(ConnectorPlugin.SYNC_OPERATIONS)
+            result[plugin.metadata.key] = definition
+        return result
+
+    def contact_sync_plugins(self) -> list[ConnectorPlugin]:
+        return [plugin for plugin in self.all() if plugin.supports_contact_sync()]
+
+    def contact_sync_keys(self) -> tuple[str, ...]:
+        return tuple(plugin.metadata.key for plugin in self.contact_sync_plugins())
+
+    def supports_contact_sync(self, key: str) -> bool:
+        plugin = self._plugins.get(key)
+        return bool(plugin and plugin.supports_contact_sync())
 
 
 _MANAGER: PluginManager | None = None

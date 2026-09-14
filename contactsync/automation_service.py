@@ -4,6 +4,7 @@ import asyncio
 import os
 
 from contactsync.automation_core import init_schema, record_error
+from contactsync.automation_monitoring import process_monitoring_actions_once
 from contactsync.automation_scheduler import enqueue_due_schedules
 from contactsync.automation_sync import process_sync_runs_once
 from contactsync.automation_webhooks import deliver_events_once
@@ -16,6 +17,7 @@ async def run_once() -> dict[str, int]:
     return {
         "scheduled": enqueue_due_schedules(),
         "sync_runs": await process_sync_runs_once(),
+        "monitoring_actions": await process_monitoring_actions_once(),
         "events": await deliver_events_once(),
     }
 

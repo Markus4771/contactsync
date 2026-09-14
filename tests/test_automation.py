@@ -2,6 +2,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 os.environ["CONTACTSYNC_DATA_DIR"] = "/tmp/contactsync-tests"
 os.environ["CONTACTSYNC_DB"] = "/tmp/contactsync-tests/test.db"
 
@@ -36,6 +38,13 @@ def test_schedule_queues_sync_run():
     with connect() as connection:
         run = connection.execute("SELECT source,target,status FROM sync_runs WHERE source='nextcloud' AND target='odoo' ORDER BY id DESC LIMIT 1").fetchone()
     assert run["status"] == "queued"
+
+
+def test_schedule_rejects_rmm_and_monitoring_plugins():
+    with pytest.raises(ValueError, match="Verzeichnis-Plugins"):
+        configure_schedule("invalid-netlock", "netlock", "odoo")
+    with pytest.raises(ValueError, match="Verzeichnis-Plugins"):
+        configure_schedule("invalid-checkmk", "odoo", "checkmk")
 
 
 def test_webhook_target_configuration():

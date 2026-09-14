@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from contactsync.monitoring_core import init_monitoring_schema
 from contactsync.rmm_core import init_rmm_schema, now_iso, upsert_device
 
 router = APIRouter(prefix="/api/v1/devices", tags=["devices"])
@@ -40,6 +41,7 @@ def _db() -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys=ON")
     init_rmm_schema(connection)
+    init_monitoring_schema(connection)
     return connection
 
 
@@ -70,9 +72,39 @@ def _publish_automation_events(device_id: int, events: list[str], payload: dict[
             continue
 
 
+def _device_list_sql() -> str:
+    return """
+        SELECT d.*, c.name AS customer_name,
+               h.id AS monitoring_host_id,
+               h.host_name AS monitoring_host_name,
+               h.site AS checkmk_site,
+               h.state AS monitoring_state,
+               h.state_label AS monitoring_state_label,
+               h.last_check AS monitoring_last_check,
+               h.last_state_change AS monitoring_last_state_change,
+               h.services_ok,
+               h.services_warn,
+               h.services_crit,
+               h.services_unknown
+          FROM managed_devices d
+          LEFT JOIN customers c ON c.id=d.customer_id
+          LEFT JOIN monitoring_hosts h ON h.id=(
+              SELECT mh.id FROM monitoring_hosts mh
+               WHERE mh.device_id=d.id
+               ORDER BY mh.id DESC LIMIT 1
+          )
+         WHERE 1=1
+    """
+
+
 @router.get("")
-def list_devices(customer_number: str | None = None, online_status: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
-    sql = "SELECT d.*, c.name AS customer_name FROM managed_devices d LEFT JOIN customers c ON c.id=d.customer_id WHERE 1=1"
+def list_devices(
+    customer_number: str | None = None,
+    online_status: str | None = None,
+    monitoring_state: str | None = None,
+    q: str | None = None,
+) -> list[dict[str, Any]]:
+    sql = _device_list_sql()
     params: list[Any] = []
     if customer_number:
         sql += " AND d.customer_number=?"
@@ -80,10 +112,16 @@ def list_devices(customer_number: str | None = None, online_status: str | None =
     if online_status:
         sql += " AND d.online_status=?"
         params.append(online_status)
+    if monitoring_state:
+        if monitoring_state == "unmonitored":
+            sql += " AND h.id IS NULL"
+        else:
+            sql += " AND h.state_label=?"
+            params.append(monitoring_state)
     if q:
         term = f"%{q}%"
-        sql += " AND (d.hostname LIKE ? OR d.ip_address LIKE ? OR d.mac_address LIKE ? OR d.serial_number LIKE ?)"
-        params.extend([term, term, term, term])
+        sql += " AND (d.hostname LIKE ? OR d.ip_address LIKE ? OR d.mac_address LIKE ? OR d.serial_number LIKE ? OR c.name LIKE ?)"
+        params.extend([term, term, term, term, term])
     sql += " ORDER BY d.hostname COLLATE NOCASE"
     with _db() as connection:
         return [dict(row) for row in connection.execute(sql, params)]
@@ -92,10 +130,24 @@ def list_devices(customer_number: str | None = None, online_status: str | None =
 @router.get("/{device_id}")
 def get_device(device_id: int) -> dict[str, Any]:
     with _db() as connection:
-        device = dict(_device_or_404(connection, device_id))
+        base = connection.execute(
+            _device_list_sql() + " AND d.id=?",
+            (device_id,),
+        ).fetchone()
+        if base is None:
+            raise HTTPException(404, "Gerät nicht gefunden")
+        device = dict(base)
         device["events"] = [dict(row) for row in connection.execute(
             "SELECT * FROM device_events WHERE device_id=? ORDER BY id DESC LIMIT 50", (device_id,)
         )]
+        host_id = device.get("monitoring_host_id")
+        if host_id:
+            device["monitoring_services"] = [dict(row) for row in connection.execute(
+                "SELECT * FROM monitoring_services WHERE monitoring_host_id=? ORDER BY state DESC,description COLLATE NOCASE",
+                (host_id,),
+            )]
+        else:
+            device["monitoring_services"] = []
         return device
 
 

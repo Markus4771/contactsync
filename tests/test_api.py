@@ -17,8 +17,8 @@ def test_health():
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["version"] == "3.4.9"
-    assert response.json()["plugins"] == 6
+    assert response.json()["version"] == "3.5.0"
+    assert response.json()["plugins"] == 7
 
 
 def test_connectors_are_plugin_managed():
@@ -27,7 +27,7 @@ def test_connectors_are_plugin_managed():
     assert response.status_code == 200
     items = response.json()
     keys = {item["key"] for item in items}
-    assert keys == {"nextcloud", "zammad", "odoo", "3cx", "glpi", "netlock"}
+    assert keys == {"nextcloud", "zammad", "odoo", "3cx", "glpi", "netlock", "checkmk"}
     assert all(item["plugin"] is True for item in items)
     assert all("plugin_version" in item for item in items)
     assert all("operations" in item for item in items)

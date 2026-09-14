@@ -21,6 +21,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
         description="RMM-Geräte, Agentstatus und Kundenzuordnung für ContactSync.",
         automation_events=("device.new", "device.offline", "device.customer_changed"),
         required_config=("url", "api_token"),
+        category="rmm",
     )
 
     def __init__(self) -> None:
@@ -29,12 +30,15 @@ class NetLockRMMPlugin(ConnectorPlugin):
     @staticmethod
     def _attach_routes() -> None:
         try:
+            from contactsync.device_page import router as page_router
             from contactsync.main import app
-            from contactsync.rmm_api import router
+            from contactsync.rmm_api import router as api_router
         except ImportError:
             return
         if not any(getattr(route, "path", "") == "/api/v1/devices" for route in app.routes):
-            app.include_router(router)
+            app.include_router(api_router)
+        if not any(getattr(route, "path", "") == "/devices" for route in app.routes):
+            app.include_router(page_router)
 
     def connection_hint(self) -> str:
         return "NetLock Server-URL und API-Token eintragen. API-Endpunkte werden erst nach Verifikation aktiviert."

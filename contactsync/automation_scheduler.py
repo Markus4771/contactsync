@@ -6,6 +6,12 @@ from datetime import timedelta
 from contactsync.automation_core import connect, init_schema, now, now_iso
 from contactsync.plugins.manager import get_plugin_manager
 
+MONITORING_EVENTS = [
+    "monitoring.host_down",
+    "monitoring.host_up",
+    "monitoring.service_critical",
+]
+
 
 def configure_webhook(name: str, url: str, events: list[str] | None = None) -> None:
     init_schema()
@@ -19,10 +25,16 @@ def configure_webhook(name: str, url: str, events: list[str] | None = None) -> N
         )
 
 
+def configure_monitoring_webhook(name: str, url: str) -> None:
+    configure_webhook(name, url, MONITORING_EVENTS)
+
+
 def configure_schedule(name: str, source: str, target: str, mode: str = "delta", interval_minutes: int = 60) -> None:
     manager = get_plugin_manager()
     if source not in manager.definitions() or target not in manager.definitions():
         raise ValueError("Unbekanntes Connector-Plugin")
+    if not manager.supports_contact_sync(source) or not manager.supports_contact_sync(target):
+        raise ValueError("Nur Verzeichnis-Plugins dürfen für Kunden-/Kontakt-Synchronisation verwendet werden")
     if source == target:
         raise ValueError("Quelle und Ziel müssen verschieden sein")
     timestamp = now_iso()
@@ -39,12 +51,19 @@ def enqueue_due_schedules() -> int:
     init_schema()
     timestamp = now_iso()
     count = 0
+    manager = get_plugin_manager()
     with connect() as connection:
         schedules = connection.execute(
             "SELECT * FROM automation_schedules WHERE enabled=1 AND (next_run_at IS NULL OR next_run_at<=?) ORDER BY id",
             (timestamp,),
         ).fetchall()
         for schedule in schedules:
+            if not manager.supports_contact_sync(schedule["source"]) or not manager.supports_contact_sync(schedule["target"]):
+                connection.execute(
+                    "UPDATE automation_schedules SET enabled=0,updated_at=? WHERE id=?",
+                    (timestamp, schedule["id"]),
+                )
+                continue
             connection.execute(
                 "INSERT INTO sync_runs(source,target,mode,status,created_at) VALUES(?,?,?,?,?)",
                 (schedule["source"], schedule["target"], schedule["mode"], "queued", timestamp),

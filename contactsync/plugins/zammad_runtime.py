@@ -13,8 +13,8 @@ class ZammadRuntimePlugin(ZammadPlugin):
         key="zammad",
         title="Zammad",
         version="1.2.0",
-        capabilities=("organizations.read", "users.read", "contacts.write", "delta"),
-        description="Zammad Connector fuer Organisationen und Benutzer",
+        capabilities=("organizations.read", "users.read", "contacts.write", "tickets.write", "delta"),
+        description="Zammad Connector fuer Organisationen, Benutzer und Monitoring-Tickets",
         automation_events=("customer.created", "customer.updated", "person.updated"),
         required_config=("url", "token"),
     )
@@ -164,3 +164,48 @@ class ZammadRuntimePlugin(ZammadPlugin):
     async def update_person(self, config: dict[str, Any], external_id: str, person: dict[str, Any]) -> WriteResult:
         row = await self._request(config, "PUT", f"/api/v1/users/{int(external_id)}", json_body=self._person_values(person))
         return WriteResult(str(external_id), False, row)
+
+    async def create_monitoring_ticket(
+        self,
+        config: dict[str, Any],
+        *,
+        title: str,
+        body: str,
+        customer: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "title": title,
+            "group": str(config.get("monitoring_group") or "Users"),
+            "customer": customer,
+            "priority": str(config.get("monitoring_priority") or "2 normal"),
+            "article": {
+                "subject": title,
+                "body": body,
+                "type": "note",
+                "internal": bool(config.get("monitoring_internal", True)),
+            },
+        }
+        row = await self._request(config, "POST", "/api/v1/tickets", json_body=payload)
+        if not isinstance(row, dict) or row.get("id") is None:
+            raise RuntimeError("Zammad lieferte keine Ticket-ID")
+        return row
+
+    async def add_monitoring_article(self, config: dict[str, Any], ticket_id: str, body: str) -> dict[str, Any]:
+        payload = {
+            "ticket_id": int(ticket_id),
+            "subject": "ContactSync Monitoring",
+            "body": body,
+            "type": "note",
+            "internal": bool(config.get("monitoring_internal", True)),
+        }
+        row = await self._request(config, "POST", "/api/v1/ticket_articles", json_body=payload)
+        return row if isinstance(row, dict) else {}
+
+    async def close_monitoring_ticket(self, config: dict[str, Any], ticket_id: str) -> dict[str, Any]:
+        row = await self._request(
+            config,
+            "PUT",
+            f"/api/v1/tickets/{int(ticket_id)}",
+            json_body={"state": str(config.get("monitoring_recovery_state") or "closed")},
+        )
+        return row if isinstance(row, dict) else {}
