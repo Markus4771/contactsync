@@ -13,6 +13,7 @@ BUILTIN_PLUGINS = (
     "contactsync.plugins.nextcloud_runtime:NextcloudRuntimePlugin",
     "contactsync.plugins.glpi_runtime:GLPIRuntimePlugin",
     "contactsync.plugins.netlock:NetLockRMMPlugin",
+    "contactsync.plugins.checkmk_plugin:CheckmkPlugin",
 )
 
 
