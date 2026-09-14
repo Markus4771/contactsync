@@ -8,9 +8,9 @@ from contactsync.plugins.base import ConnectorPlugin
 
 BUILTIN_PLUGINS = (
     "contactsync.plugins.odoo_runtime:OdooRuntimePlugin",
-    "contactsync.plugins.zammad:ZammadPlugin",
-    "contactsync.plugins.threecx:ThreeCXPlugin",
-    "contactsync.plugins.nextcloud:NextcloudPlugin",
+    "contactsync.plugins.zammad_runtime:ZammadRuntimePlugin",
+    "contactsync.plugins.threecx_runtime:ThreeCXRuntimePlugin",
+    "contactsync.plugins.nextcloud_runtime:NextcloudRuntimePlugin",
 )
 
 
