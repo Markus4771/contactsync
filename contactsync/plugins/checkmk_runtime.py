@@ -25,6 +25,7 @@ class CheckmkRuntimePlugin(ConnectorPlugin):
         description="Checkmk Monitoring, Host-Provisionierung und Gerätezuordnung.",
         automation_events=("monitoring.host_down", "monitoring.host_up", "monitoring.service_critical"),
         required_config=("url", "site", "username", "automation_secret"),
+        category="monitoring",
     )
 
     SYNC_OPERATIONS = (
@@ -41,7 +42,6 @@ class CheckmkRuntimePlugin(ConnectorPlugin):
 
     def definition(self) -> dict[str, Any]:
         definition = super().definition()
-        definition["category"] = "monitoring"
         definition["operations"] = list(self.SYNC_OPERATIONS)
         return definition
 
