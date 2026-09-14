@@ -11,6 +11,7 @@ BUILTIN_PLUGINS = (
     "contactsync.plugins.zammad_runtime:ZammadRuntimePlugin",
     "contactsync.plugins.threecx_runtime:ThreeCXRuntimePlugin",
     "contactsync.plugins.nextcloud_runtime:NextcloudRuntimePlugin",
+    "contactsync.plugins.glpi_runtime:GLPIRuntimePlugin",
 )
 
 
