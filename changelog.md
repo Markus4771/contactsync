@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.4.5
+
+- Zammad-Connector produktiv über REST-API angebunden.
+- Zammad Organisationen werden als Kunden/Firmen gelesen und geschrieben.
+- Zammad Benutzer werden als Ansprechpartner gelesen und geschrieben.
+- Optionales Mapping eines eigenen Zammad-Kundennummernfeldes ergänzt.
+- Nextcloud-Connector auf echte CardDAV-Kommunikation umgestellt.
+- Nextcloud Kunden und Ansprechpartner werden als vCards gelesen, angelegt und aktualisiert.
+- ContactSync-spezifische vCard-Felder für Kundennummer, Entitätstyp und Kundenbezug ergänzt.
+- 3CX V20 XAPI Authentifizierung und Verbindungstest implementiert.
+- 3CX Benutzerimport paginiert mit maximal 100 Datensätzen pro Anfrage, damit das XAPI-Limit eingehalten wird.
+- 3CX Kundendaten und Telefonbuch-Schreibzugriffe bleiben getrennt, solange kein stabil dokumentierter Phonebook-Endpunkt verfügbar ist.
+- Zammad-, Nextcloud- und 3CX-Plugin-Version auf 1.2.0 angehoben.
+
 ## 3.4.4
 
 - Odoo-Connector auf echte JSON-RPC-Kommunikation umgestellt.
