@@ -1,16 +1,16 @@
 schema: itpz/v1
 id: contactsync-professional
 name: ContactSync Professional
-version: 3.3.0
+version: 3.4.0
 type: deb
 channel: stable
-description: Modulare Kontakt- und Verzeichniszentrale mit FastAPI, SQLite und Weboberfläche.
+description: Modulare Kontakt- und Verzeichniszentrale mit Plugin-Framework für externe Systeme.
 category: Kommunikation
 homepage: https://github.com/Markus4771/contactsync
 package:
   name: contactsync-professional
-  asset: contactsync-professional_3.3.0_all.deb
-  sha256_asset: contactsync-professional_3.3.0_all.deb.sha256
+  asset: contactsync-professional_3.4.0_all.deb
+  sha256_asset: contactsync-professional_3.4.0_all.deb.sha256
 source:
   provider: github
   repository: Markus4771/contactsync
@@ -32,3 +32,6 @@ permissions:
 metadata:
   maintainer: Markus4771
   port: 8000
+  architecture: core-plus-connector-plugins
+  automation_role: master-data-hub
+  plugin_api: contactsync.plugins
