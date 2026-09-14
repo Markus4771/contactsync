@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from contactsync.plugins.contracts import ConnectionTestResult, PluginOperationNotImplemented, WriteResult
+
 
 @dataclass(frozen=True)
 class PluginMetadata:
@@ -19,6 +21,16 @@ class PluginMetadata:
 class ConnectorPlugin(ABC):
     metadata: PluginMetadata
 
+    SYNC_OPERATIONS = (
+        "test_connection",
+        "fetch_customers",
+        "fetch_persons",
+        "create_customer",
+        "update_customer",
+        "create_person",
+        "update_person",
+    )
+
     def definition(self) -> dict[str, Any]:
         return {
             "title": self.metadata.title,
@@ -27,6 +39,7 @@ class ConnectorPlugin(ABC):
             "description": self.metadata.description,
             "automation_events": list(self.metadata.automation_events),
             "required_config": list(self.metadata.required_config),
+            "operations": list(self.SYNC_OPERATIONS),
             "plugin": True,
         }
 
@@ -46,6 +59,30 @@ class ConnectorPlugin(ABC):
 
     def normalize_person(self, record: dict[str, Any]) -> dict[str, Any]:
         return dict(record)
+
+    def pending_operation(self, operation: str) -> PluginOperationNotImplemented:
+        return PluginOperationNotImplemented(f"{self.metadata.title}: {operation} ist noch nicht angebunden")
+
+    async def test_connection(self, config: dict[str, Any]) -> ConnectionTestResult:
+        raise self.pending_operation("test_connection")
+
+    async def fetch_customers(self, config: dict[str, Any], *, since: str | None = None) -> list[dict[str, Any]]:
+        raise self.pending_operation("fetch_customers")
+
+    async def fetch_persons(self, config: dict[str, Any], *, since: str | None = None) -> list[dict[str, Any]]:
+        raise self.pending_operation("fetch_persons")
+
+    async def create_customer(self, config: dict[str, Any], customer: dict[str, Any]) -> WriteResult:
+        raise self.pending_operation("create_customer")
+
+    async def update_customer(self, config: dict[str, Any], external_id: str, customer: dict[str, Any]) -> WriteResult:
+        raise self.pending_operation("update_customer")
+
+    async def create_person(self, config: dict[str, Any], person: dict[str, Any]) -> WriteResult:
+        raise self.pending_operation("create_person")
+
+    async def update_person(self, config: dict[str, Any], external_id: str, person: dict[str, Any]) -> WriteResult:
+        raise self.pending_operation("update_person")
 
     @abstractmethod
     def connection_hint(self) -> str:
