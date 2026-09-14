@@ -13,6 +13,7 @@ sed -i "s/^Version:.*/Version: $VERSION/" "$PKG/DEBIAN/control"
 install -m 0755 "$ROOT/debian/postinst" "$PKG/DEBIAN/postinst"
 install -m 0755 "$ROOT/debian/prerm" "$PKG/DEBIAN/prerm"
 install -m 0644 "$ROOT/packaging/contactsync-professional.service" "$PKG/etc/systemd/system/contactsync-professional.service"
+install -m 0644 "$ROOT/packaging/contactsync-automation.service" "$PKG/etc/systemd/system/contactsync-automation.service"
 dpkg-deb --root-owner-group --build "$PKG" "$OUT"
 sha256sum "$OUT" > "$OUT.sha256"
 dpkg-deb -f "$OUT" Package Version Architecture
