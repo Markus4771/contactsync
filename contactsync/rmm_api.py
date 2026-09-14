@@ -50,17 +50,24 @@ def _device_or_404(connection: sqlite3.Connection, device_id: int) -> sqlite3.Ro
     return row
 
 
-def _emit_device_events(connection: sqlite3.Connection, device_id: int, events: list[str], payload: dict[str, Any]) -> None:
+def _store_device_events(connection: sqlite3.Connection, device_id: int, events: list[str], payload: dict[str, Any]) -> None:
     for event in events:
         connection.execute(
             "INSERT INTO device_events(device_id,event_type,payload_json,created_at) VALUES (?,?,?,?)",
             (device_id, event, json.dumps(payload, ensure_ascii=False), now_iso()),
         )
+
+
+def _publish_automation_events(device_id: int, events: list[str], payload: dict[str, Any]) -> None:
+    try:
+        from contactsync.automation_core import emit_event
+    except ImportError:
+        return
+    for event in events:
         try:
-            from contactsync.automation_core import emit_event
-            emit_event(connection, event, {"device_id": device_id, **payload})
-        except (ImportError, sqlite3.OperationalError):
-            pass
+            emit_event(event, "device", device_id, {"device_id": device_id, **payload})
+        except sqlite3.OperationalError:
+            continue
 
 
 @router.get("")
@@ -96,15 +103,18 @@ def get_device(device_id: int) -> dict[str, Any]:
 def import_device(payload: DeviceImport) -> dict[str, Any]:
     data = payload.model_dump()
     data["raw_json"] = json.dumps(data, ensure_ascii=False)
+    event_payload = {
+        "source": data["source"], "external_id": data["external_id"],
+        "hostname": data["hostname"], "customer_number": data.get("customer_number"),
+        "online_status": data["online_status"],
+    }
     with _db() as connection:
         device_id, events = upsert_device(connection, data)
-        _emit_device_events(connection, device_id, events, {
-            "source": data["source"], "external_id": data["external_id"],
-            "hostname": data["hostname"], "customer_number": data.get("customer_number"),
-            "online_status": data["online_status"],
-        })
+        _store_device_events(connection, device_id, events, event_payload)
         connection.commit()
-        return {"device": dict(_device_or_404(connection, device_id)), "events": events}
+        device = dict(_device_or_404(connection, device_id))
+    _publish_automation_events(device_id, events, event_payload)
+    return {"device": device, "events": events}
 
 
 @router.patch("/{device_id}/glpi")
