@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.3.1
+
+- Erweiterter Kundenstamm mit eindeutiger Kundennummer.
+- Zentrale E-Mail-Adresse, Telefon, Mobil, Adresse, Webseite und Status ergänzt.
+- USt-IdNr., Steuernummer, Debitorennummer, Branche und Vertragsdaten ergänzt.
+- Firmen/Kunden und Ansprechpartner getrennt modelliert.
+- Mehrere Ansprechpartner pro Kunde mit Hauptansprechpartner möglich.
+- REST-API für Kunden und Ansprechpartner ergänzt.
+- Zentrales Feldmapping für Connectoren ergänzt.
+- Bestehende Kontakte aus 3.3.0 werden bei der Migration in den neuen Kundenstamm übernommen.
+- Kundenstamm- und Feldmapping-Seiten in der Weboberfläche ergänzt.
+
 ## 3.2.09
 
 - Robuste Datenbankmigration für die Benutzerverwaltung.
