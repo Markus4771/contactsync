@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.4.4
+
+- Odoo-Connector auf echte JSON-RPC-Kommunikation umgestellt.
+- Verbindungstest mit Odoo-Anmeldung und Serverversionsabfrage ergänzt.
+- Kunden/Firmen werden aus `res.partner` gelesen und in das ContactSync-Kundenmodell normalisiert.
+- Ansprechpartner werden inklusive Firmenbezug aus `res.partner` gelesen.
+- Delta-Abfragen über `write_date` werden unterstützt.
+- Kunden und Ansprechpartner können in Odoo angelegt und aktualisiert werden.
+- Kundennummer, E-Mail, Telefon, Mobil, Adresse, Website und USt-ID werden übertragen.
+- Odoo-Plugin-Version auf 1.2.0 angehoben und als produktiver JSON-RPC-Transport gekennzeichnet.
+- Tests decken Lesen, Erstellen, Aktualisieren und Firmenbezug der Ansprechpartner ab.
+
 ## 3.4.3
 
 - Einheitliche asynchrone Plugin-Schnittstelle für alle Connectoren eingeführt.

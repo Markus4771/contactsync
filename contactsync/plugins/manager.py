@@ -7,7 +7,7 @@ from typing import Iterable
 from contactsync.plugins.base import ConnectorPlugin
 
 BUILTIN_PLUGINS = (
-    "contactsync.plugins.odoo:OdooPlugin",
+    "contactsync.plugins.odoo_runtime:OdooRuntimePlugin",
     "contactsync.plugins.zammad:ZammadPlugin",
     "contactsync.plugins.threecx:ThreeCXPlugin",
     "contactsync.plugins.nextcloud:NextcloudPlugin",
