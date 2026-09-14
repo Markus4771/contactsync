@@ -102,29 +102,35 @@ async def sync_checkmk() -> dict[str, Any]:
         host_name = str(service.get("host_name") or "")
         by_host.setdefault(host_name, []).append(service)
 
-    host_count = service_count = event_count = 0
+    host_count = service_count = 0
+    pending_events: list[tuple[str, int, dict[str, Any]]] = []
     with _db() as connection:
         site = str(config.get("site") or "")
         for host in hosts:
             host_id, events = upsert_host(connection, host, site=site)
             host_count += 1
             for event in events:
-                _emit(event, host_id, {"host_name": host.get("host_name"), "state": host.get("state"), "site": site})
-                event_count += 1
+                pending_events.append((event, host_id, {
+                    "host_name": host.get("host_name"),
+                    "state": host.get("state"),
+                    "site": site,
+                }))
             for service in by_host.get(str(host.get("host_name") or ""), []):
                 service_events = upsert_service(connection, host_id, service)
                 service_count += 1
                 for event in service_events:
-                    _emit(event, host_id, {
+                    pending_events.append((event, host_id, {
                         "host_name": host.get("host_name"),
                         "service": service.get("description"),
                         "state": service.get("state"),
                         "plugin_output": service.get("plugin_output"),
-                    })
-                    event_count += 1
+                    }))
             refresh_service_counters(connection, host_id)
         connection.commit()
-    return {"hosts": host_count, "services": service_count, "events": event_count}
+
+    for event_type, entity_id, payload in pending_events:
+        _emit(event_type, entity_id, payload)
+    return {"hosts": host_count, "services": service_count, "events": len(pending_events)}
 
 
 @router.post("/checkmk/hosts", status_code=201)
