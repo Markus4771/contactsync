@@ -45,6 +45,10 @@ async def process_sync_runs_once(limit: int = 3) -> int:
     manager = get_plugin_manager()
     for run in runs:
         try:
+            if not manager.supports_contact_sync(run["source"]) or not manager.supports_contact_sync(run["target"]):
+                raise RuntimeError(
+                    "Ungültiger Kontakt-Sync: RMM- und Monitoring-Plugins dürfen nicht als Quelle oder Ziel verwendet werden"
+                )
             with connect() as connection:
                 connection.execute("UPDATE sync_runs SET status='running',last_error=NULL WHERE id=?", (run["id"],))
                 source_config = _connector_config(connection, run["source"])
