@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.4.7
+
+- GLPI als fünften integrierten Connector-Plugin ergänzt.
+- Verbindung über die GLPI REST API mit Benutzer-Token und optionalem App-Token.
+- GLPI Entities werden als Kunden/Firmen gelesen, angelegt und aktualisiert.
+- GLPI Users werden als Ansprechpartner gelesen, angelegt und aktualisiert.
+- Ansprechpartner behalten über `default_entities_id` ihren Kunden-/Entity-Bezug.
+- Kundennummer wird für GLPI Entities im Kommentar mit `Kundennummer:` abgelegt und beim Import wieder erkannt.
+- Delta-Synchronisation über `date_mod` unterstützt.
+- GLPI ist in PluginManager, Health-Check, Connector-API und IT-Projektzentrale-Manifest integriert.
+- Release- und Debian-Paketmetadaten auf 3.4.7 aktualisiert.
+- Plugin- und Pakettests um GLPI erweitert.
+
 ## 3.4.6
 
 - Separaten Automatisierungs-Worker als systemd-Dienst ergänzt.
