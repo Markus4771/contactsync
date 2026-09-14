@@ -6,6 +6,12 @@ from datetime import timedelta
 from contactsync.automation_core import connect, init_schema, now, now_iso
 from contactsync.plugins.manager import get_plugin_manager
 
+MONITORING_EVENTS = [
+    "monitoring.host_down",
+    "monitoring.host_up",
+    "monitoring.service_critical",
+]
+
 
 def configure_webhook(name: str, url: str, events: list[str] | None = None) -> None:
     init_schema()
@@ -17,6 +23,10 @@ def configure_webhook(name: str, url: str, events: list[str] | None = None) -> N
                ON CONFLICT(name) DO UPDATE SET url=excluded.url,events_json=excluded.events_json,enabled=1,updated_at=excluded.updated_at""",
             (name, url, json.dumps(events or ["*"]), 1, timestamp, timestamp),
         )
+
+
+def configure_monitoring_webhook(name: str, url: str) -> None:
+    configure_webhook(name, url, MONITORING_EVENTS)
 
 
 def configure_schedule(name: str, source: str, target: str, mode: str = "delta", interval_minutes: int = 60) -> None:
