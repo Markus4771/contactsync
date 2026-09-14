@@ -7,7 +7,8 @@ def test_builtin_connector_plugins_are_discovered():
     assert {"odoo", "zammad", "3cx", "nextcloud"} <= set(definitions)
     for key in ("odoo", "zammad", "3cx", "nextcloud"):
         assert definitions[key]["plugin"] is True
-        assert definitions[key]["plugin_version"] == "1.0.0"
+        assert definitions[key]["plugin_version"] == "1.1.0"
+        assert definitions[key]["required_config"]
 
 
 def test_plugins_publish_automation_events():
@@ -20,3 +21,41 @@ def test_plugin_keys_are_unique():
     manager = PluginManager()
     keys = [plugin.metadata.key for plugin in manager.all()]
     assert len(keys) == len(set(keys))
+
+
+def test_required_configuration_is_validated():
+    manager = PluginManager()
+    assert manager.get("odoo").validate_config({})
+    assert manager.get("zammad").validate_config({"url": "https://zammad.example", "token": "abc"}) == []
+    assert manager.get("nextcloud").validate_config({"url": "https://cloud.example"})
+
+
+def test_connector_normalization_for_core_customer_fields():
+    manager = PluginManager()
+    odoo = manager.get("odoo").normalize_customer({
+        "id": 7,
+        "ref": "K-1001",
+        "name": "Muster GmbH",
+        "email": "info@example.invalid",
+        "zip": "84028",
+        "city": "Landshut",
+    })
+    assert odoo["customer_number"] == "K-1001"
+    assert odoo["name"] == "Muster GmbH"
+    assert odoo["email"] == "info@example.invalid"
+    assert odoo["postal_code"] == "84028"
+
+
+def test_connector_normalization_for_persons():
+    manager = PluginManager()
+    person = manager.get("3cx").normalize_person({
+        "id": 42,
+        "FirstName": "Max",
+        "LastName": "Mustermann",
+        "EmailAddress": "max@example.invalid",
+        "Number": "101",
+    })
+    assert person["first_name"] == "Max"
+    assert person["last_name"] == "Mustermann"
+    assert person["email"] == "max@example.invalid"
+    assert person["external_id"] == "42"

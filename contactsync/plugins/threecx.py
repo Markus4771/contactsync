@@ -5,14 +5,24 @@ class ThreeCXPlugin(ConnectorPlugin):
     metadata = PluginMetadata(
         key="3cx",
         title="3CX",
-        version="1.0.0",
+        version="1.1.0",
         capabilities=("users.read", "phonebook.write"),
-        description="3CX Connector",
+        description="3CX Connector für Benutzer und Telefonbuch",
         automation_events=("person.updated",),
+        required_config=("url", "client_id", "client_secret"),
     )
 
     def connection_hint(self) -> str:
-        return "3CX Server und API-Konfiguration"
+        return "3CX Server-URL, Client-ID und Client-Secret"
+
+    def normalize_customer(self, record: dict) -> dict:
+        return {
+            "customer_number": record.get("customer_number") or record.get("CustomerNumber"),
+            "name": record.get("company") or record.get("Company") or "",
+            "email": record.get("email") or record.get("EmailAddress"),
+            "phone": record.get("phone") or record.get("Number"),
+            "source": "3cx",
+        }
 
     def normalize_person(self, record: dict) -> dict:
         return {
