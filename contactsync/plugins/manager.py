@@ -54,6 +54,16 @@ class PluginManager:
     def definitions(self) -> dict[str, dict]:
         return {plugin.metadata.key: plugin.definition() for plugin in self.all()}
 
+    def contact_sync_plugins(self) -> list[ConnectorPlugin]:
+        return [plugin for plugin in self.all() if plugin.supports_contact_sync()]
+
+    def contact_sync_keys(self) -> tuple[str, ...]:
+        return tuple(plugin.metadata.key for plugin in self.contact_sync_plugins())
+
+    def supports_contact_sync(self, key: str) -> bool:
+        plugin = self._plugins.get(key)
+        return bool(plugin and plugin.supports_contact_sync())
+
 
 _MANAGER: PluginManager | None = None
 
