@@ -17,7 +17,7 @@ def test_health():
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["version"] == "3.4.2"
+    assert response.json()["version"] == "3.4.3"
     assert response.json()["plugins"] == 4
 
 
@@ -30,6 +30,7 @@ def test_connectors_are_plugin_managed():
     assert keys == {"nextcloud", "zammad", "odoo", "3cx"}
     assert all(item["plugin"] is True for item in items)
     assert all("plugin_version" in item for item in items)
+    assert all("operations" in item for item in items)
 
 
 def test_connector_config_is_validated_by_plugin():
