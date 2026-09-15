@@ -26,6 +26,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
             ("contactsync.rmm_api", "/api/v1/devices"),
             ("contactsync.netlock_api", "/api/v1/netlock/import-devices"),
             ("contactsync.security_api", "/api/v1/auth/login"),
+            ("contactsync.field_mapping_api", "/api/v1/field-mappings"),
             ("contactsync.device_page", "/devices"),
             ("contactsync.customer_overview", "/api/v1/customers/{customer_id}/overview"),
             ("contactsync.incidents_page", "/api/v1/incidents"),
