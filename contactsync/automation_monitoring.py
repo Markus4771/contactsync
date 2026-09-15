@@ -7,41 +7,16 @@ from contactsync.automation_core import MAX_RETRIES, connect, init_schema, now_i
 from contactsync.plugins.manager import get_plugin_manager
 from contactsync.secure_config import runtime_config
 
-MONITORING_EVENTS = (
-    "monitoring.host_down",
-    "monitoring.host_up",
-    "monitoring.service_critical",
-)
+MONITORING_EVENTS = ("monitoring.host_down", "monitoring.host_up", "monitoring.service_critical")
 
 
 def init_monitoring_action_schema() -> None:
     init_schema()
     with connect() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS monitoring_actions (
-                event_id INTEGER PRIMARY KEY,
-                action_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                external_id TEXT,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                next_attempt_at TEXT,
-                last_error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS monitoring_incidents (
-                incident_key TEXT PRIMARY KEY,
-                entity_id INTEGER,
-                incident_type TEXT NOT NULL,
-                external_id TEXT,
-                status TEXT NOT NULL,
-                last_event_id INTEGER,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            """
-        )
+        connection.executescript("""
+            CREATE TABLE IF NOT EXISTS monitoring_actions (event_id INTEGER PRIMARY KEY,action_type TEXT NOT NULL,status TEXT NOT NULL,external_id TEXT,attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at TEXT,last_error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS monitoring_incidents (incident_key TEXT PRIMARY KEY,entity_id INTEGER,incident_type TEXT NOT NULL,external_id TEXT,status TEXT NOT NULL,last_event_id INTEGER,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        """)
 
 
 def _zammad_config() -> dict[str, Any] | None:
@@ -69,12 +44,12 @@ def _incident_key(event_type: str, entity_id: int | None, payload: dict[str, Any
 def _title_and_body(event_type: str, payload: dict[str, Any]) -> tuple[str, str]:
     host = str(payload.get("host_name") or "Unbekannter Host")
     if event_type == "monitoring.host_down":
-        return (f"[Checkmk] Host DOWN: {host}", f"ContactSync hat einen Checkmk-Ausfall erkannt.\n\nHost: {host}\nStatus: DOWN\nSite: {payload.get('site') or '-'}")
+        return f"[Checkmk] Host DOWN: {host}", f"ContactSync hat einen Checkmk-Ausfall erkannt.\n\nHost: {host}\nStatus: DOWN\nSite: {payload.get('site') or '-'}"
     if event_type == "monitoring.service_critical":
         service = str(payload.get("service") or "Unbekannter Service")
         output = str(payload.get("plugin_output") or "-")
-        return (f"[Checkmk] CRIT: {host} / {service}", f"ContactSync hat einen kritischen Checkmk-Service erkannt.\n\nHost: {host}\nService: {service}\nStatus: CRIT\nAusgabe: {output}")
-    return (f"[Checkmk] Host wieder UP: {host}", f"ContactSync hat die Wiederherstellung erkannt.\n\nHost: {host}\nStatus: UP\nSite: {payload.get('site') or '-'}")
+        return f"[Checkmk] CRIT: {host} / {service}", f"ContactSync hat einen kritischen Checkmk-Service erkannt.\n\nHost: {host}\nService: {service}\nStatus: CRIT\nAusgabe: {output}"
+    return f"[Checkmk] Host wieder UP: {host}", f"ContactSync hat die Wiederherstellung erkannt.\n\nHost: {host}\nStatus: UP\nSite: {payload.get('site') or '-'}"
 
 
 def _action_row(event_id: int):
@@ -85,23 +60,13 @@ def _action_row(event_id: int):
 def _save_action(event_id: int, *, status: str, external_id: str | None = None, attempts: int = 0, next_attempt_at: str | None = None, last_error: str | None = None) -> None:
     timestamp = now_iso()
     with connect() as connection:
-        connection.execute(
-            """INSERT INTO monitoring_actions(event_id,action_type,status,external_id,attempts,next_attempt_at,last_error,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(event_id) DO UPDATE SET status=excluded.status,external_id=excluded.external_id,
-                 attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at,last_error=excluded.last_error,updated_at=excluded.updated_at""",
-            (event_id, "zammad_ticket", status, external_id, attempts, next_attempt_at, last_error, timestamp, timestamp),
-        )
+        connection.execute("""INSERT INTO monitoring_actions(event_id,action_type,status,external_id,attempts,next_attempt_at,last_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET status=excluded.status,external_id=excluded.external_id,attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at,last_error=excluded.last_error,updated_at=excluded.updated_at""", (event_id, "zammad_ticket", status, external_id, attempts, next_attempt_at, last_error, timestamp, timestamp))
 
 
 def _save_incident(incident_key: str, *, entity_id: int | None, incident_type: str, external_id: str | None, status: str, event_id: int) -> None:
     timestamp = now_iso()
     with connect() as connection:
-        connection.execute(
-            """INSERT INTO monitoring_incidents(incident_key,entity_id,incident_type,external_id,status,last_event_id,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(incident_key) DO UPDATE SET external_id=excluded.external_id,status=excluded.status,last_event_id=excluded.last_event_id,updated_at=excluded.updated_at""",
-            (incident_key, entity_id, incident_type, external_id, status, event_id, timestamp, timestamp),
-        )
+        connection.execute("""INSERT INTO monitoring_incidents(incident_key,entity_id,incident_type,external_id,status,last_event_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(incident_key) DO UPDATE SET external_id=excluded.external_id,status=excluded.status,last_event_id=excluded.last_event_id,updated_at=excluded.updated_at""", (incident_key, entity_id, incident_type, external_id, status, event_id, timestamp, timestamp))
 
 
 def _incident(incident_key: str):
@@ -115,10 +80,7 @@ async def process_monitoring_actions_once(limit: int = 10) -> int:
     if config is None:
         return 0
     with connect() as connection:
-        events = connection.execute(
-            "SELECT * FROM automation_events WHERE event_type IN (?,?,?) ORDER BY id DESC LIMIT ?",
-            (*MONITORING_EVENTS, limit),
-        ).fetchall()
+        events = connection.execute("SELECT * FROM automation_events WHERE event_type IN (?,?,?) ORDER BY id DESC LIMIT ?", (*MONITORING_EVENTS, limit)).fetchall()
     plugin = get_plugin_manager().get("zammad")
     processed = 0
     for event in reversed(events):
@@ -131,20 +93,21 @@ async def process_monitoring_actions_once(limit: int = 10) -> int:
             existing = _incident(incident_key)
             if event["event_type"] == "monitoring.host_up":
                 if existing and existing["external_id"]:
-                    await plugin.add_ticket_article(config, existing["external_id"], body)
-                    await plugin.close_ticket(config, existing["external_id"])
-                    _save_incident(incident_key, entity_id=event["entity_id"], incident_type="host", external_id=existing["external_id"], status="closed", event_id=event["id"])
+                    await plugin.add_monitoring_article(config, existing["external_id"], body)
+                    await plugin.close_monitoring_ticket(config, existing["external_id"])
+                    _save_incident(incident_key, entity_id=event["entity_id"], incident_type="host", external_id=existing["external_id"], status="resolved", event_id=event["id"])
                     external_id = existing["external_id"]
                 else:
                     external_id = None
+                _save_action(event["id"], status="completed", external_id=external_id)
             elif existing and existing["status"] == "open" and existing["external_id"]:
-                await plugin.add_ticket_article(config, existing["external_id"], body)
-                external_id = existing["external_id"]
+                # Repeated CRIT/DOWN events must not create duplicate tickets.
+                _save_action(event["id"], status="ignored", external_id=existing["external_id"])
             else:
-                result = await plugin.create_ticket(config, title=title, body=body, customer=config["monitoring_customer"])
-                external_id = result.external_id
+                result = await plugin.create_monitoring_ticket(config, title=title, body=body, customer=config["monitoring_customer"])
+                external_id = str(result["id"])
                 _save_incident(incident_key, entity_id=event["entity_id"], incident_type="service" if event["event_type"] == "monitoring.service_critical" else "host", external_id=external_id, status="open", event_id=event["id"])
-            _save_action(event["id"], status="completed", external_id=external_id)
+                _save_action(event["id"], status="completed", external_id=external_id)
             processed += 1
         except Exception as exc:
             previous = _action_row(event["id"])
