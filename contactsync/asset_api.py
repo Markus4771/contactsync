@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from contactsync.asset_core import asset_query, asset_summary, get_asset, init_asset_schema
+from contactsync.asset_matching import auto_link_safe_matches, detect_duplicates, ensure_asset_links_schema, link_devices, unlink_device
 
 router = APIRouter(tags=["assets"])
 
@@ -22,6 +23,11 @@ class AssetMetadataUpdate(BaseModel):
     notes: str | None = None
 
 
+class AssetLinkRequest(BaseModel):
+    primary_device_id: int
+    linked_device_id: int
+
+
 def _db() -> sqlite3.Connection:
     from contactsync.main import DB_PATH, DATA_DIR
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -29,6 +35,7 @@ def _db() -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys=ON")
     init_asset_schema(connection)
+    ensure_asset_links_schema(connection)
     return connection
 
 
@@ -51,6 +58,42 @@ def list_assets(customer_number: str | None = None, status: str | None = None, q
         return {"summary": asset_summary(connection), "assets": [dict(row) for row in connection.execute(sql, params)]}
 
 
+@router.get("/api/v1/assets/duplicates")
+def asset_duplicates() -> dict[str, Any]:
+    with _db() as connection:
+        duplicates = detect_duplicates(connection)
+        return {"count": len(duplicates), "duplicates": duplicates}
+
+
+@router.post("/api/v1/assets/auto-link")
+def asset_auto_link() -> dict[str, int]:
+    with _db() as connection:
+        result = auto_link_safe_matches(connection)
+        connection.commit()
+        return result
+
+
+@router.post("/api/v1/assets/link")
+def asset_link(payload: AssetLinkRequest) -> dict[str, Any]:
+    try:
+        with _db() as connection:
+            link_devices(connection, payload.primary_device_id, payload.linked_device_id)
+            connection.commit()
+            return {"ok": True, "primary_device_id": payload.primary_device_id, "linked_device_id": payload.linked_device_id}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete("/api/v1/assets/link/{linked_device_id}")
+def asset_unlink(linked_device_id: int) -> dict[str, Any]:
+    with _db() as connection:
+        removed = unlink_device(connection, linked_device_id)
+        connection.commit()
+        if not removed:
+            raise HTTPException(404, "Asset-Verknüpfung nicht gefunden")
+        return {"ok": True, "linked_device_id": linked_device_id}
+
+
 @router.get("/api/v1/assets/{device_id}")
 def asset_detail(device_id: int) -> dict[str, Any]:
     with _db() as connection:
@@ -61,6 +104,9 @@ def asset_detail(device_id: int) -> dict[str, Any]:
             "SELECT * FROM monitoring_services WHERE monitoring_host_id=? ORDER BY state DESC,description COLLATE NOCASE",
             (asset.get("monitoring_host_id"),),
         )] if asset.get("monitoring_host_id") else []
+        asset["links"] = [dict(row) for row in connection.execute(
+            "SELECT * FROM asset_links WHERE primary_device_id=? OR linked_device_id=? ORDER BY id", (device_id, device_id)
+        )]
         return asset
 
 
@@ -87,20 +133,24 @@ def assets_page() -> HTMLResponse:
     with _db() as connection:
         summary = asset_summary(connection)
         rows = [dict(row) for row in connection.execute(asset_query() + " ORDER BY c.name COLLATE NOCASE,d.hostname COLLATE NOCASE")]
+        duplicates = detect_duplicates(connection)
     cards = "".join(f"<div class='card'><b>{value}</b><span>{label}</span></div>" for label, value in [
         ("Assets", summary["total"]), ("Online", summary["online"]), ("Offline", summary["offline"]),
-        ("GLPI", summary["glpi_linked"]), ("Checkmk", summary["checkmk_linked"]), ("Monitoring-Probleme", summary["monitoring_problem"]),
+        ("GLPI", summary["glpi_linked"]), ("Checkmk", summary["checkmk_linked"]), ("Mögliche Dubletten", len(duplicates)),
     ])
     body = "".join(
-        "<tr>" +
-        f"<td><a href='/devices/{r['id']}'>{r['hostname']}</a></td><td>{r.get('customer_name') or '-'}</td>" +
-        f"<td>{r.get('asset_tag') or '-'}</td><td>{r.get('online_status') or '-'}</td>" +
-        f"<td>{r.get('glpi_asset_id') or '-'}</td><td>{r.get('monitoring_state_label') or '-'}</td>" +
-        f"<td>{r.get('services_warn') or 0}/{r.get('services_crit') or 0}</td><td>{r.get('lifecycle_status') or 'active'}</td></tr>"
+        "<tr>" + f"<td><a href='/devices/{r['id']}'>{r['hostname']}</a></td><td>{r.get('customer_name') or '-'}</td>" +
+        f"<td>{r.get('asset_tag') or '-'}</td><td>{r.get('online_status') or '-'}</td><td>{r.get('glpi_asset_id') or '-'}</td>" +
+        f"<td>{r.get('monitoring_state_label') or '-'}</td><td>{r.get('services_warn') or 0}/{r.get('services_crit') or 0}</td><td>{r.get('lifecycle_status') or 'active'}</td></tr>"
         for r in rows
     ) or "<tr><td colspan='8'>Noch keine Assets vorhanden.</td></tr>"
+    duplicate_rows = "".join(
+        f"<tr><td>{d['left']['hostname']} ({d['left']['source']})</td><td>{d['right']['hostname']} ({d['right']['source']})</td><td>{d['matched_by']}</td><td>{d['score']}%</td><td>{'automatisch möglich' if d['automatic'] else 'manuell prüfen'}</td></tr>"
+        for d in duplicates
+    ) or "<tr><td colspan='5'>Keine möglichen Dubletten gefunden.</td></tr>"
     html = f"""<!doctype html><html><head><meta charset='utf-8'><title>ContactSync Asset-Zentrale</title>
-    <style>body{{font-family:Arial,sans-serif;margin:30px;background:#f6f7f9;color:#20242a}}h1{{margin-bottom:6px}}.cards{{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}}.card{{background:white;padding:16px 22px;border-radius:8px;box-shadow:0 1px 4px #ccd;min-width:120px}}.card b{{display:block;font-size:25px}}.card span{{color:#667}}table{{width:100%;border-collapse:collapse;background:white}}th,td{{padding:10px;border-bottom:1px solid #e5e7eb;text-align:left}}th{{background:#eef1f5}}a{{color:#1769aa;text-decoration:none}}</style></head>
+    <style>body{{font-family:Arial,sans-serif;margin:30px;background:#f6f7f9;color:#20242a}}h1{{margin-bottom:6px}}.cards{{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}}.card{{background:white;padding:16px 22px;border-radius:8px;box-shadow:0 1px 4px #ccd;min-width:120px}}.card b{{display:block;font-size:25px}}.card span{{color:#667}}table{{width:100%;border-collapse:collapse;background:white;margin-bottom:28px}}th,td{{padding:10px;border-bottom:1px solid #e5e7eb;text-align:left}}th{{background:#eef1f5}}a{{color:#1769aa;text-decoration:none}}</style></head>
     <body><h1>Asset-Zentrale</h1><p>Zentrale Sicht auf ContactSync, NetLock RMM, GLPI und Checkmk.</p><div class='cards'>{cards}</div>
-    <table><thead><tr><th>Gerät</th><th>Kunde</th><th>Asset-Tag</th><th>RMM</th><th>GLPI</th><th>Checkmk</th><th>WARN/CRIT</th><th>Lifecycle</th></tr></thead><tbody>{body}</tbody></table></body></html>"""
+    <h2>Assets</h2><table><thead><tr><th>Gerät</th><th>Kunde</th><th>Asset-Tag</th><th>RMM</th><th>GLPI</th><th>Checkmk</th><th>WARN/CRIT</th><th>Lifecycle</th></tr></thead><tbody>{body}</tbody></table>
+    <h2>Mögliche Dubletten</h2><p>Seriennummer und MAC-Adresse haben hohe Priorität. Hostname-Treffer werden nur zur manuellen Prüfung vorgeschlagen.</p><table><thead><tr><th>Gerät A</th><th>Gerät B</th><th>Treffer</th><th>Vertrauen</th><th>Aktion</th></tr></thead><tbody>{duplicate_rows}</tbody></table></body></html>"""
     return HTMLResponse(html)
