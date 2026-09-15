@@ -8,28 +8,42 @@ Modulare Kontakt-, Kunden-, Geräte- und Automatisierungszentrale für Debian mi
 
 Der Branch `agent/3.5.4-security` enthält den aktuellen Entwicklungsstand von ContactSync Professional 3.5.4. Dieser Stand ist für Testsysteme vorgesehen und noch nicht für den Produktivbetrieb freigegeben.
 
-## Installation auf Debian
+## Installation auf Debian direkt über GitHub
 
 ### Voraussetzungen
 
 - Debian 12 oder Debian 13
 - Root- bzw. sudo-Rechte
-- Internetzugang zum Herunterladen des öffentlichen GitHub-Repositories
-- Port 8000 für den direkten Testzugriff bzw. ein vorhandener Reverse Proxy
+- Internetzugang zu GitHub
+- Port 8000 für direkten Testzugriff bzw. ein vorhandener Reverse Proxy
 
-### Empfohlene Testinstallation von GitHub
+### 3.5.4-Testversion installieren
+
+Für einen Testserver ist keine lokale Git-Kopie erforderlich. Der Installer wird direkt aus GitHub geladen und lädt anschließend selbst den vollständigen gewünschten ContactSync-Stand von GitHub.
 
 ```bash
-sudo apt update
-sudo apt install -y git
-git clone https://github.com/Markus4771/contactsync.git
-cd contactsync
-git switch agent/3.5.4-security
+wget -O install.sh https://raw.githubusercontent.com/Markus4771/contactsync/agent/3.5.4-security/install.sh
 chmod +x install.sh
-sudo ./install.sh
+sudo ./install.sh --test
 ```
 
-Das Installationsskript richtet ContactSync unter `/opt/contactsync-professional` ein, legt das Datenverzeichnis `/var/lib/contactsync-professional` an, installiert die Python-Abhängigkeiten in einer virtuellen Umgebung und aktiviert den systemd-Dienst `contactsync-professional.service`.
+Falls `wget` nicht vorhanden ist:
+
+```bash
+curl -fL https://raw.githubusercontent.com/Markus4771/contactsync/agent/3.5.4-security/install.sh -o install.sh
+chmod +x install.sh
+sudo ./install.sh --test
+```
+
+`--test` installiert den Branch `agent/3.5.4-security`. Das Skript lädt die Anwendung vollständig von GitHub, installiert die benötigten Debian-Pakete und Python-Abhängigkeiten, richtet den systemd-Dienst ein, startet ContactSync und führt abschließend einen Health-Check durch.
+
+Installationspfade:
+
+- Anwendung: `/opt/contactsync-professional`
+- Datenbank und persistente Daten: `/var/lib/contactsync-professional`
+- systemd-Dienst: `contactsync-professional.service`
+
+Bei einer erneuten Installation bleiben die persistenten Daten unter `/var/lib/contactsync-professional` erhalten.
 
 ### Installation prüfen
 
@@ -38,7 +52,7 @@ systemctl status contactsync-professional.service
 curl http://127.0.0.1:8000/health
 ```
 
-Die letzten Protokollmeldungen können mit folgendem Befehl angezeigt werden:
+Protokoll anzeigen:
 
 ```bash
 journalctl -u contactsync-professional.service -n 100 --no-pager
@@ -50,20 +64,45 @@ Die Weboberfläche ist standardmäßig erreichbar unter:
 http://SERVER-IP:8000/
 ```
 
-Für einen späteren externen Zugriff wird ein Reverse Proxy wie Nginx bzw. Nginx Proxy Manager empfohlen.
-
 ### Testversion aktualisieren
 
-Im geklonten Repository:
+Für ein Update wird der aktuelle Installer erneut von GitHub geladen und ausgeführt:
 
 ```bash
-cd contactsync
-git switch agent/3.5.4-security
-git pull
-sudo ./install.sh
+wget -O install.sh https://raw.githubusercontent.com/Markus4771/contactsync/agent/3.5.4-security/install.sh
+chmod +x install.sh
+sudo ./install.sh --test
 ```
 
-Vor Updates eines bereits mit produktiven Daten verwendeten Systems sollte eine Sicherung des Datenverzeichnisses `/var/lib/contactsync-professional` erstellt werden.
+Vor Updates eines Systems mit wichtigen Daten sollte `/var/lib/contactsync-professional` gesichert werden.
+
+### Stable-Version
+
+Der Installer unterstützt auch den Stable-Kanal:
+
+```bash
+sudo ./install.sh --stable
+```
+
+`--stable` installiert den Stand aus `main`. Solange 3.5.4 noch nicht freigegeben und nach `main` übernommen wurde, ist für Tests ausdrücklich `--test` zu verwenden.
+
+### Bestimmten Branch oder Tag installieren
+
+```bash
+sudo ./install.sh --ref BRANCH_ODER_TAG
+```
+
+Nach einer späteren 3.5.4-Freigabe kann beispielsweise ein entsprechender Release-Tag gezielt installiert werden.
+
+### Fehlersuche
+
+Falls der automatische Health-Check fehlschlägt:
+
+```bash
+systemctl --no-pager --full status contactsync-professional.service
+journalctl -u contactsync-professional.service -n 100 --no-pager
+curl -v http://127.0.0.1:8000/health
+```
 
 ## Enthaltene Funktionen
 
@@ -78,11 +117,11 @@ Vor Updates eines bereits mit produktiven Daten verwendeten Systems sollte eine 
 - Synchronisations- und Automatisierungsfunktionen
 - systemd-Dienst
 - Debian-Paket-Build über GitHub Actions
-- neue Sicherheitsfunktionen in 3.5.4: Session-Authentifizierung, Rollen, CSRF-Schutz und verschlüsselte Connector-Zugangsdaten
+- Sicherheitsfunktionen in 3.5.4: Session-Authentifizierung, Rollen, CSRF-Schutz und verschlüsselte Connector-Zugangsdaten
 
 ## Wichtiger Hinweis zu 3.5.4
 
-3.5.4 befindet sich noch in der Fertigstellung. Der Debian-Paket-Build funktioniert bereits, aber die vollständige Testsuite ist noch nicht grün. Insbesondere Datenbank-Isolation, Field-Mapping, einzelne geschützte Device-API-Tests und die NetLock-Routenregistrierung werden noch bearbeitet. Daher zunächst nur auf einem Testserver einsetzen und keine produktiven Zugangsdaten verwenden.
+3.5.4 befindet sich noch in der Fertigstellung. Der Debian-Paket-Build funktioniert bereits, die vollständige Testsuite ist jedoch noch nicht grün. Der aktuelle Teststand sollte deshalb zunächst nur auf einem Testserver eingesetzt werden. Produktive Zugangsdaten sollten erst nach Abschluss der Security- und Integrationstests verwendet werden.
 
 ## Entwicklung
 
