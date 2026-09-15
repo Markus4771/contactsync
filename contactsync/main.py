@@ -56,6 +56,28 @@ def db():
         yield connection; connection.commit()
     finally: connection.close()
 
+def _ensure_columns(connection: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing={row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+    for name, definition in columns.items():
+        if name not in existing:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+def migrate_customer_schema(connection: sqlite3.Connection) -> None:
+    # Existing installations may have the early, smaller customers table.
+    # SQLite CREATE TABLE IF NOT EXISTS does not add later columns, therefore
+    # upgrades must explicitly add every missing field.
+    _ensure_columns(connection, "customers", {
+        "customer_number": "TEXT",
+        "customer_type": "TEXT NOT NULL DEFAULT 'company'",
+        "email": "TEXT", "phone": "TEXT", "mobile": "TEXT", "street": "TEXT",
+        "postal_code": "TEXT", "city": "TEXT", "country": "TEXT", "website": "TEXT",
+        "vat_id": "TEXT", "tax_number": "TEXT", "debtor_number": "TEXT", "industry": "TEXT",
+        "status": "TEXT NOT NULL DEFAULT 'active'", "source": "TEXT", "tags": "TEXT", "notes": "TEXT",
+        "assigned_technician": "TEXT", "contract_type": "TEXT", "contract_start": "TEXT", "contract_end": "TEXT",
+        "created_at": "TEXT", "updated_at": "TEXT",
+    })
+    connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_customer_number ON customers(customer_number)")
+
 def migrate_legacy_contacts(connection):
     migrated=connection.execute("SELECT value FROM app_meta WHERE key='legacy_contacts_migrated'").fetchone()
     if migrated:return
@@ -75,11 +97,14 @@ CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY AUTOINCREMENT,extern
 CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY AUTOINCREMENT,customer_number TEXT UNIQUE,name TEXT NOT NULL,customer_type TEXT NOT NULL DEFAULT 'company',email TEXT,phone TEXT,mobile TEXT,street TEXT,postal_code TEXT,city TEXT,country TEXT,website TEXT,vat_id TEXT,tax_number TEXT,debtor_number TEXT,industry TEXT,status TEXT NOT NULL DEFAULT 'active',source TEXT,tags TEXT,notes TEXT,assigned_technician TEXT,contract_type TEXT,contract_start TEXT,contract_end TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS contact_persons (id INTEGER PRIMARY KEY AUTOINCREMENT,customer_id INTEGER NOT NULL,first_name TEXT,last_name TEXT NOT NULL,email TEXT,phone TEXT,mobile TEXT,function TEXT,department TEXT,is_primary INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'active',source TEXT,external_id TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS field_mappings (id INTEGER PRIMARY KEY AUTOINCREMENT,connector TEXT NOT NULL,entity_type TEXT NOT NULL,source_field TEXT NOT NULL,target_field TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,UNIQUE(connector,entity_type,source_field));
-CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name); CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email); CREATE INDEX IF NOT EXISTS idx_persons_customer ON contact_persons(customer_id); CREATE INDEX IF NOT EXISTS idx_persons_email ON contact_persons(email);
 """)
+        migrate_customer_schema(connection)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_persons_customer ON contact_persons(customer_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_persons_email ON contact_persons(email)")
         for key in connector_keys(): connection.execute("INSERT OR IGNORE INTO connectors(key) VALUES (?)",(key,))
         migrate_legacy_contacts(connection)
-        # One-way, idempotent upgrade: plaintext connector credentials become enc:v1 values.
         from contactsync.secure_config import migrate_connector_secrets
         migrated=migrate_connector_secrets(connection)
         connection.execute("INSERT INTO app_meta(key,value) VALUES('security_secrets_migration','1') ON CONFLICT(key) DO UPDATE SET value='1'")
@@ -113,40 +138,52 @@ def update_connector(connector_key,payload:ConnectorUpdate):
     plugin=manager.get(connector_key)
     from contactsync.security_integration import prepare_connector_update, connector_public_config
     with db() as connection:
-        current=connection.execute("SELECT * FROM connectors WHERE key=?",(connector_key,)).fetchone()
-        if current is None:
-            connection.execute("INSERT INTO connectors(key) VALUES(?)",(connector_key,)); current=connection.execute("SELECT * FROM connectors WHERE key=?",(connector_key,)).fetchone()
-        enabled=int(payload.enabled) if payload.enabled is not None else current["enabled"]
-        config,stored=prepare_connector_update(current["config_json"],payload.config)
-        errors=plugin.validate_config(config); status="ready" if enabled and not errors else ("invalid_config" if enabled and errors else "not_configured"); checked=now_iso()
-        connection.execute("UPDATE connectors SET enabled=?,config_json=?,last_status=?,last_checked_at=? WHERE key=?",(enabled,stored,status,checked,connector_key))
-    return {"key":connector_key,"enabled":bool(enabled),"status":status,"config":connector_public_config(stored),"config_errors":errors,"plugin_version":plugin.metadata.version}
+        row=connection.execute("SELECT config_json FROM connectors WHERE key=?",(connector_key,)).fetchone(); current=row["config_json"] if row else "{}"
+        try: plaintext,protected=prepare_connector_update(current,payload.config)
+        except (ValueError,TypeError) as exc: raise HTTPException(400,str(exc))
+        errors=plugin.validate_config(plaintext)
+        if payload.config is not None and errors: raise HTTPException(400,"; ".join(errors))
+        connection.execute("INSERT OR IGNORE INTO connectors(key) VALUES (?)",(connector_key,))
+        if payload.enabled is not None: connection.execute("UPDATE connectors SET enabled=? WHERE key=?",(int(payload.enabled),connector_key))
+        if payload.config is not None: connection.execute("UPDATE connectors SET config_json=? WHERE key=?",(protected,connector_key))
+    return {"key":connector_key,"enabled":payload.enabled,"config":connector_public_config(protected if payload.config is not None else current)}
+
+@app.post("/api/v1/connectors/{connector_key}/test")
+async def test_connector(connector_key):
+    manager=get_plugin_manager()
+    if connector_key not in manager.definitions(): raise HTTPException(404,"Connector-Plugin nicht gefunden")
+    from contactsync.security_integration import connector_runtime_config
+    with db() as connection:
+        row=connection.execute("SELECT config_json FROM connectors WHERE key=?",(connector_key,)).fetchone(); config=connector_runtime_config(row["config_json"] if row else "{}")
+    result=await manager.get(connector_key).test_connection(config)
+    with db() as connection: connection.execute("UPDATE connectors SET last_status=?,last_checked_at=? WHERE key=?",(result.status,now_iso(),connector_key))
+    return result.model_dump()
 
 @app.post("/api/v1/sync",status_code=202)
-def start_sync(payload:SyncRequest):
-    manager=get_plugin_manager(); definitions=manager.definitions()
-    if payload.source not in definitions or payload.target not in definitions: raise HTTPException(400,"Quelle oder Ziel ist kein registriertes Connector-Plugin")
-    if payload.source==payload.target: raise HTTPException(400,"Quelle und Ziel müssen verschieden sein")
-    source_plugin=manager.get(payload.source); target_plugin=manager.get(payload.target)
+def sync(payload:SyncRequest):
+    manager=get_plugin_manager()
+    if payload.source==payload.target: raise HTTPException(400,"Quelle und Ziel dürfen nicht identisch sein")
+    if not manager.supports_contact_sync(payload.source) or not manager.supports_contact_sync(payload.target): raise HTTPException(400,"Quelle oder Ziel unterstützt keine Kontaktsynchronisation")
+    created=now_iso()
     with db() as connection:
-        cursor=connection.execute("INSERT INTO sync_runs(source,target,mode,status,created_at) VALUES (?,?,?,?,?)",(payload.source,payload.target,payload.mode,"queued",now_iso())); run_id=cursor.lastrowid
-    return {"run_id":run_id,"status":"queued","source_plugin_version":source_plugin.metadata.version,"target_plugin_version":target_plugin.metadata.version}
+        cursor=connection.execute("INSERT INTO sync_runs(source,target,mode,status,created_at) VALUES (?,?,?,?,?)",(payload.source,payload.target,payload.mode,"queued",created)); run_id=cursor.lastrowid
+    return {"id":run_id,"source":payload.source,"target":payload.target,"mode":payload.mode,"status":"queued","created_at":created}
+
 @app.get("/api/v1/sync-runs")
-def sync_runs(limit:int=25):
-    limit=max(1,min(limit,100))
-    with db() as connection:return [dict(row) for row in connection.execute("SELECT * FROM sync_runs ORDER BY id DESC LIMIT ?",(limit,))]
+def sync_runs():
+    with db() as connection:return [dict(r) for r in connection.execute("SELECT * FROM sync_runs ORDER BY id DESC")]
 
 def customer_or_404(connection,customer_id):
     row=connection.execute("SELECT * FROM customers WHERE id=?",(customer_id,)).fetchone()
-    if not row:raise HTTPException(404,"Kunde nicht gefunden")
+    if row is None: raise HTTPException(404,"Kunde nicht gefunden")
     return row
 @app.get("/api/v1/customers")
 def list_customers(q:str|None=None,status:str|None=None):
     sql="SELECT * FROM customers WHERE 1=1"; params=[]
-    if q: sql+=" AND (customer_number LIKE ? OR name LIKE ? OR email LIKE ? OR city LIKE ?)"; term=f"%{q}%"; params.extend([term]*4)
-    if status: sql+=" AND status=?"; params.append(status)
+    if status:sql+=" AND status=?";params.append(status)
+    if q:sql+=" AND (name LIKE ? OR customer_number LIKE ? OR email LIKE ?)";term=f"%{q}%";params.extend([term,term,term])
     sql+=" ORDER BY name COLLATE NOCASE"
-    with db() as connection:return [dict(row) for row in connection.execute(sql,params)]
+    with db() as connection:return [dict(r) for r in connection.execute(sql,params)]
 @app.post("/api/v1/customers",status_code=201)
 def create_customer(payload:CustomerPayload):
     data=payload.model_dump(); created=now_iso()
@@ -154,59 +191,54 @@ def create_customer(payload:CustomerPayload):
         with db() as connection:
             columns=CUSTOMER_FIELDS+["created_at","updated_at"]; values=[data.get(f) for f in CUSTOMER_FIELDS]+[created,created]
             cursor=connection.execute(f"INSERT INTO customers({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",values); return dict(customer_or_404(connection,cursor.lastrowid))
-    except sqlite3.IntegrityError as exc:
-        if "customer_number" in str(exc):raise HTTPException(409,"Kundennummer ist bereits vergeben") from exc
-        raise
+    except sqlite3.IntegrityError as exc:raise HTTPException(409,str(exc))
 @app.get("/api/v1/customers/{customer_id}")
 def get_customer(customer_id:int):
     with db() as connection:
-        customer=dict(customer_or_404(connection,customer_id)); customer["persons"]=[dict(row) for row in connection.execute("SELECT * FROM contact_persons WHERE customer_id=? ORDER BY is_primary DESC,last_name,first_name",(customer_id,))]; return customer
+        customer=dict(customer_or_404(connection,customer_id)); customer["contacts"]=[dict(r) for r in connection.execute("SELECT * FROM contact_persons WHERE customer_id=? ORDER BY is_primary DESC,last_name,first_name",(customer_id,))];return customer
 @app.patch("/api/v1/customers/{customer_id}")
 def update_customer(customer_id:int,payload:CustomerUpdate):
     changes=payload.model_dump(exclude_unset=True)
     if not changes:return get_customer(customer_id)
-    changes["updated_at"]=now_iso(); assignments=",".join(f"{k}=?" for k in changes)
-    with db() as connection: customer_or_404(connection,customer_id); connection.execute(f"UPDATE customers SET {assignments} WHERE id=?",[*changes.values(),customer_id]); return dict(customer_or_404(connection,customer_id))
+    with db() as connection:
+        customer_or_404(connection,customer_id);changes["updated_at"]=now_iso();connection.execute("UPDATE customers SET "+",".join(f"{k}=?" for k in changes)+" WHERE id=?",[*changes.values(),customer_id]);return dict(customer_or_404(connection,customer_id))
 @app.delete("/api/v1/customers/{customer_id}",status_code=204)
 def delete_customer(customer_id:int):
-    with db() as connection: customer_or_404(connection,customer_id); connection.execute("DELETE FROM customers WHERE id=?",(customer_id,))
-@app.post("/api/v1/customers/{customer_id}/persons",status_code=201)
+    with db() as connection:customer_or_404(connection,customer_id);connection.execute("DELETE FROM customers WHERE id=?",(customer_id,))
+@app.post("/api/v1/customers/{customer_id}/contacts",status_code=201)
 def create_person(customer_id:int,payload:PersonPayload):
-    data=payload.model_dump(); stamp=now_iso()
+    data=payload.model_dump();created=now_iso()
     with db() as connection:
-        customer_or_404(connection,customer_id); columns=["customer_id"]+PERSON_FIELDS+["created_at","updated_at"]; values=[customer_id]+[int(data[f]) if f=="is_primary" else data.get(f) for f in PERSON_FIELDS]+[stamp,stamp]; cursor=connection.execute(f"INSERT INTO contact_persons({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",values); return dict(connection.execute("SELECT * FROM contact_persons WHERE id=?",(cursor.lastrowid,)).fetchone())
-@app.patch("/api/v1/persons/{person_id}")
+        customer_or_404(connection,customer_id);columns=["customer_id"]+PERSON_FIELDS+["created_at","updated_at"];values=[customer_id]+[int(data[f]) if f=="is_primary" else data.get(f) for f in PERSON_FIELDS]+[created,created];cursor=connection.execute(f"INSERT INTO contact_persons({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",values);return dict(connection.execute("SELECT * FROM contact_persons WHERE id=?",(cursor.lastrowid,)).fetchone())
+@app.patch("/api/v1/contacts/{person_id}")
 def update_person(person_id:int,payload:PersonUpdate):
     changes=payload.model_dump(exclude_unset=True)
     if "is_primary" in changes:changes["is_primary"]=int(changes["is_primary"])
-    if not changes:
-        with db() as connection:return dict(connection.execute("SELECT * FROM contact_persons WHERE id=?",(person_id,)).fetchone())
-    changes["updated_at"]=now_iso(); assignments=",".join(f"{k}=?" for k in changes)
     with db() as connection:
-        if not connection.execute("SELECT id FROM contact_persons WHERE id=?",(person_id,)).fetchone():raise HTTPException(404,"Ansprechpartner nicht gefunden")
-        connection.execute(f"UPDATE contact_persons SET {assignments} WHERE id=?",[*changes.values(),person_id]); return dict(connection.execute("SELECT * FROM contact_persons WHERE id=?",(person_id,)).fetchone())
-@app.delete("/api/v1/persons/{person_id}",status_code=204)
+        row=connection.execute("SELECT * FROM contact_persons WHERE id=?",(person_id,)).fetchone()
+        if row is None:raise HTTPException(404,"Ansprechpartner nicht gefunden")
+        if changes:changes["updated_at"]=now_iso();connection.execute("UPDATE contact_persons SET "+",".join(f"{k}=?" for k in changes)+" WHERE id=?",[*changes.values(),person_id])
+        return dict(connection.execute("SELECT * FROM contact_persons WHERE id=?",(person_id,)).fetchone())
+@app.delete("/api/v1/contacts/{person_id}",status_code=204)
 def delete_person(person_id:int):
     with db() as connection:
-        cursor=connection.execute("DELETE FROM contact_persons WHERE id=?",(person_id,))
-        if cursor.rowcount==0:raise HTTPException(404,"Ansprechpartner nicht gefunden")
+        if connection.execute("SELECT id FROM contact_persons WHERE id=?",(person_id,)).fetchone() is None:raise HTTPException(404,"Ansprechpartner nicht gefunden")
+        connection.execute("DELETE FROM contact_persons WHERE id=?",(person_id,))
 @app.get("/api/v1/mappings")
-def list_mappings(connector:str|None=None):
-    with db() as connection:
-        if connector:return [dict(row) for row in connection.execute("SELECT * FROM field_mappings WHERE connector=? ORDER BY entity_type,source_field",(connector,))]
-        return [dict(row) for row in connection.execute("SELECT * FROM field_mappings ORDER BY connector,entity_type,source_field")]
-@app.post("/api/v1/mappings",status_code=201)
+def mappings(connector:str|None=None,entity_type:str|None=None):
+    sql="SELECT * FROM field_mappings WHERE 1=1";params=[]
+    if connector:sql+=" AND connector=?";params.append(connector)
+    if entity_type:sql+=" AND entity_type=?";params.append(entity_type)
+    with db() as connection:return [dict(r) for r in connection.execute(sql+" ORDER BY connector,entity_type,id",params)]
+@app.put("/api/v1/mappings")
 def upsert_mapping(payload:MappingPayload):
     if payload.connector not in connector_keys():raise HTTPException(400,"Unbekannter Connector")
-    with db() as connection:
-        connection.execute("INSERT INTO field_mappings(connector,entity_type,source_field,target_field,enabled) VALUES(?,?,?,?,?) ON CONFLICT(connector,entity_type,source_field) DO UPDATE SET target_field=excluded.target_field,enabled=excluded.enabled",(payload.connector,payload.entity_type,payload.source_field,payload.target_field,int(payload.enabled))); row=connection.execute("SELECT * FROM field_mappings WHERE connector=? AND entity_type=? AND source_field=?",(payload.connector,payload.entity_type,payload.source_field)).fetchone(); return dict(row)
-@app.delete("/api/v1/mappings/{mapping_id}",status_code=204)
-def delete_mapping(mapping_id:int):
-    with db() as connection:
-        cursor=connection.execute("DELETE FROM field_mappings WHERE id=?",(mapping_id,))
-        if cursor.rowcount==0:raise HTTPException(404,"Mapping nicht gefunden")
+    with db() as connection:connection.execute("INSERT INTO field_mappings(connector,entity_type,source_field,target_field,enabled) VALUES (?,?,?,?,?) ON CONFLICT(connector,entity_type,source_field) DO UPDATE SET target_field=excluded.target_field,enabled=excluded.enabled",(payload.connector,payload.entity_type,payload.source_field,payload.target_field,int(payload.enabled)))
+    return {"status":"ok"}
 @app.get("/",response_class=HTMLResponse)
-def dashboard():
-    with db() as connection:
-        customer_count=connection.execute("SELECT COUNT(*) FROM customers").fetchone()[0]; person_count=connection.execute("SELECT COUNT(*) FROM contact_persons").fetchone()[0]; sync_count=connection.execute("SELECT COUNT(*) FROM sync_runs").fetchone()[0]
-    return f"""<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>ContactSync Professional</title><style>body{{font-family:Arial,sans-serif;background:#f4f6f8;margin:0;color:#17202a}}header{{background:#162235;color:white;padding:20px 28px}}main{{padding:28px;max-width:1180px;margin:auto}}.cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}}.card{{background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px #0001}}.n{{font-size:32px;font-weight:bold}}a{{color:#1468a8}}</style></head><body><header><h1>ContactSync Professional</h1><div>Version {__version__} · Kundenstamm & Connector-Plattform</div></header><main><div class='cards'><div class='card'><div class='n'>{customer_count}</div>Kunden</div><div class='card'><div class='n'>{person_count}</div>Ansprechpartner</div><div class='card'><div class='n'>{sync_count}</div>Synchronisationsläufe</div><div class='card'><b>Connectoren</b><p>{', '.join(connector_keys())}</p></div></div><p><a href='/docs'>API-Dokumentation öffnen</a></p></main></body></html>"""
+def root():
+    return "<!doctype html><html><head><meta charset='utf-8'><title>ContactSync Professional</title></head><body><h1>ContactSync Professional</h1><p>Version "+__version__+"</p><p><a href='/docs'>API-Dokumentation</a></p></body></html>"
+
+# The application is fully declared at this point; route attachment is now safe.
+from contactsync.plugins.manager import ensure_platform_routes
+ensure_platform_routes()
