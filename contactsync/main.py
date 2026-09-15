@@ -17,15 +17,12 @@ from contactsync.plugins.manager import get_plugin_manager
 
 DATA_DIR = Path(os.getenv("CONTACTSYNC_DATA_DIR", "/var/lib/contactsync-professional"))
 DB_PATH = Path(os.getenv("CONTACTSYNC_DB", str(DATA_DIR / "contactsync.db")))
-
 def connector_definitions(): return get_plugin_manager().definitions()
 def connector_keys(): return tuple(connector_definitions())
-
 CUSTOMER_FIELDS=["customer_number","name","customer_type","email","phone","mobile","street","postal_code","city","country","website","vat_id","tax_number","debtor_number","industry","status","source","tags","notes","assigned_technician","contract_type","contract_start","contract_end"]
 PERSON_FIELDS=["first_name","last_name","email","phone","mobile","function","department","is_primary","status","source","external_id"]
 app=FastAPI(title="ContactSync Professional",version=__version__)
 def now_iso(): return datetime.now(timezone.utc).isoformat()
-
 class ConnectorUpdate(BaseModel): enabled:bool|None=None; config:dict[str,Any]|None=None
 class SyncRequest(BaseModel): source:str; target:str; mode:str=Field(default="delta",pattern="^(delta|full)$")
 class CustomerPayload(BaseModel):
@@ -37,13 +34,12 @@ class PersonPayload(BaseModel):
 class PersonUpdate(BaseModel):
     first_name:str|None=None; last_name:str|None=None; email:str|None=None; phone:str|None=None; mobile:str|None=None; function:str|None=None; department:str|None=None; is_primary:bool|None=None; status:str|None=Field(default=None,pattern="^(active|inactive)$"); source:str|None=None; external_id:str|None=None
 class MappingPayload(BaseModel): connector:str; entity_type:str=Field(pattern="^(customer|person)$"); source_field:str; target_field:str; enabled:bool=True
-
+class GLPILinkPayload(BaseModel): glpi_asset_id:str
 @contextmanager
 def db():
     DATA_DIR.mkdir(parents=True,exist_ok=True); c=sqlite3.connect(DB_PATH); c.row_factory=sqlite3.Row; c.execute("PRAGMA foreign_keys=ON")
     try: yield c; c.commit()
     finally: c.close()
-
 def _ensure_columns(c,table,columns):
     existing={r[1] for r in c.execute(f"PRAGMA table_info({table})")}
     for name,definition in columns.items():
@@ -173,28 +169,35 @@ def upsert_mapping(payload:MappingPayload):
     if payload.connector not in connector_keys():raise HTTPException(400,"Unbekannter Connector")
     with db() as c:c.execute("INSERT INTO field_mappings(connector,entity_type,source_field,target_field,enabled) VALUES (?,?,?,?,?) ON CONFLICT(connector,entity_type,source_field) DO UPDATE SET target_field=excluded.target_field,enabled=excluded.enabled",(payload.connector,payload.entity_type,payload.source_field,payload.target_field,int(payload.enabled)))
     return {"status":"ok"}
+
+# Keep the GLPI link on the canonical application database.  This endpoint is
+# deliberately registered before the modular RMM router so import/link requests
+# cannot diverge because of recursive plugin route registration or DB aliases.
+@app.patch("/api/v1/devices/{device_id}/glpi")
+def canonical_link_glpi_asset(device_id:int,payload:GLPILinkPayload):
+    with db() as c:
+        row=c.execute("SELECT * FROM managed_devices WHERE id=?",(device_id,)).fetchone()
+        if row is None:raise HTTPException(404,"Gerät nicht gefunden")
+        c.execute("UPDATE managed_devices SET glpi_asset_id=?,updated_at=? WHERE id=?",(payload.glpi_asset_id,now_iso(),device_id))
+        return dict(c.execute("SELECT * FROM managed_devices WHERE id=?",(device_id,)).fetchone())
+@app.delete("/api/v1/devices/{device_id}/glpi")
+def canonical_unlink_glpi_asset(device_id:int):
+    with db() as c:
+        row=c.execute("SELECT * FROM managed_devices WHERE id=?",(device_id,)).fetchone()
+        if row is None:raise HTTPException(404,"Gerät nicht gefunden")
+        c.execute("UPDATE managed_devices SET glpi_asset_id=NULL,updated_at=? WHERE id=?",(now_iso(),device_id))
+        return dict(c.execute("SELECT * FROM managed_devices WHERE id=?",(device_id,)).fetchone())
+
 @app.get("/",response_class=HTMLResponse)
 def root():return "<!doctype html><html><head><meta charset='utf-8'><title>ContactSync Professional</title></head><body><h1>ContactSync Professional</h1><p>Version "+__version__+"</p><p><a href='/docs'>API-Dokumentation</a></p></body></html>"
-
-# Register the complete platform routers first.
 from contactsync import rmm_api as _rmm_api
 from contactsync import netlock_api as _netlock_api
 app.include_router(_rmm_api.router)
 app.include_router(_netlock_api.router)
-
-# Critical endpoints are additionally verified explicitly.  include_router()
-# copies the routes that exist at call time; an earlier recursive import can
-# otherwise leave only a partially populated router in the application.
 def _has_route(path: str, method: str) -> bool:
-    method = method.upper()
-    return any(getattr(route, "path", "") == path and method in (getattr(route, "methods", set()) or set()) for route in app.routes)
-
-if not _has_route("/api/v1/devices/{device_id}/glpi", "PATCH"):
-    app.add_api_route("/api/v1/devices/{device_id}/glpi", _rmm_api.link_glpi_asset, methods=["PATCH"], tags=["devices"])
-if not _has_route("/api/v1/devices/{device_id}/glpi", "DELETE"):
-    app.add_api_route("/api/v1/devices/{device_id}/glpi", _rmm_api.unlink_glpi_asset, methods=["DELETE"], tags=["devices"])
-if not _has_route("/api/v1/netlock/import-devices", "POST"):
-    app.add_api_route("/api/v1/netlock/import-devices", _netlock_api.import_netlock_devices, methods=["POST"], tags=["netlock"])
-
+    method=method.upper(); return any(getattr(route,"path","")==path and method in (getattr(route,"methods",set()) or set()) for route in app.routes)
+if not _has_route("/api/v1/devices/{device_id}/glpi","PATCH"):app.add_api_route("/api/v1/devices/{device_id}/glpi",_rmm_api.link_glpi_asset,methods=["PATCH"],tags=["devices"])
+if not _has_route("/api/v1/devices/{device_id}/glpi","DELETE"):app.add_api_route("/api/v1/devices/{device_id}/glpi",_rmm_api.unlink_glpi_asset,methods=["DELETE"],tags=["devices"])
+if not _has_route("/api/v1/netlock/import-devices","POST"):app.add_api_route("/api/v1/netlock/import-devices",_netlock_api.import_netlock_devices,methods=["POST"],tags=["netlock"])
 from contactsync.plugins.manager import ensure_platform_routes
 ensure_platform_routes()
