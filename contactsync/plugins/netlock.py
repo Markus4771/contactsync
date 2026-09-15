@@ -41,7 +41,6 @@ class NetLockRMMPlugin(ConnectorPlugin):
         route_modules = (
             ("contactsync.rmm_api", "/api/v1/devices"),
             ("contactsync.device_page", "/devices"),
-            ("contactsync.device_detail", "/devices/{device_id}"),
             ("contactsync.customer_overview", "/api/v1/customers/{customer_id}/overview"),
             ("contactsync.incidents_page", "/api/v1/incidents"),
             ("contactsync.automation_page", "/api/v1/automation/monitoring"),
@@ -55,6 +54,24 @@ class NetLockRMMPlugin(ConnectorPlugin):
             except (ImportError, AttributeError):
                 continue
             app.include_router(router)
+
+        # The device detail endpoint is an application UI route rather than a
+        # provider transport endpoint. Register it explicitly after the other
+        # RMM routes so its availability does not depend on router import order.
+        detail_path = "/devices/{device_id}"
+        if not any(getattr(route, "path", "") == detail_path for route in app.routes):
+            try:
+                detail_module = import_module("contactsync.device_detail")
+                endpoint = getattr(detail_module, "device_detail_page")
+            except (ImportError, AttributeError):
+                return
+            app.add_api_route(
+                detail_path,
+                endpoint,
+                methods=["GET"],
+                response_class=getattr(detail_module, "HTMLResponse"),
+                tags=["devices-ui"],
+            )
 
     def connection_hint(self) -> str:
         return "NetLock Server-URL und API-Token eintragen. API-Endpunkte werden erst nach Verifikation aktiviert."
