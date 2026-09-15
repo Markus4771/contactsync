@@ -176,10 +176,25 @@ def upsert_mapping(payload:MappingPayload):
 @app.get("/",response_class=HTMLResponse)
 def root():return "<!doctype html><html><head><meta charset='utf-8'><title>ContactSync Professional</title></head><body><h1>ContactSync Professional</h1><p>Version "+__version__+"</p><p><a href='/docs'>API-Dokumentation</a></p></body></html>"
 
-# Register platform APIs directly after app declaration; this avoids connector/import-order ownership.
-from contactsync.rmm_api import router as rmm_router
-from contactsync.netlock_api import router as netlock_router
-app.include_router(rmm_router)
-app.include_router(netlock_router)
+# Register the complete platform routers first.
+from contactsync import rmm_api as _rmm_api
+from contactsync import netlock_api as _netlock_api
+app.include_router(_rmm_api.router)
+app.include_router(_netlock_api.router)
+
+# Critical endpoints are additionally verified explicitly.  include_router()
+# copies the routes that exist at call time; an earlier recursive import can
+# otherwise leave only a partially populated router in the application.
+def _has_route(path: str, method: str) -> bool:
+    method = method.upper()
+    return any(getattr(route, "path", "") == path and method in (getattr(route, "methods", set()) or set()) for route in app.routes)
+
+if not _has_route("/api/v1/devices/{device_id}/glpi", "PATCH"):
+    app.add_api_route("/api/v1/devices/{device_id}/glpi", _rmm_api.link_glpi_asset, methods=["PATCH"], tags=["devices"])
+if not _has_route("/api/v1/devices/{device_id}/glpi", "DELETE"):
+    app.add_api_route("/api/v1/devices/{device_id}/glpi", _rmm_api.unlink_glpi_asset, methods=["DELETE"], tags=["devices"])
+if not _has_route("/api/v1/netlock/import-devices", "POST"):
+    app.add_api_route("/api/v1/netlock/import-devices", _netlock_api.import_netlock_devices, methods=["POST"], tags=["netlock"])
+
 from contactsync.plugins.manager import ensure_platform_routes
 ensure_platform_routes()
