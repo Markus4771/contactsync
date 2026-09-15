@@ -8,7 +8,11 @@ CHANNEL="${CONTACTSYNC_CHANNEL:-stable}"
 REF="${CONTACTSYNC_REF:-}"
 APP_DIR=/opt/contactsync-professional
 DATA_DIR=/var/lib/contactsync-professional
+DB_FILE="$DATA_DIR/contactsync.db"
+DB_BACKUP="$DATA_DIR/contactsync.db.pre-upgrade"
 SERVICE_USER=contactsync
+MAIN_SERVICE=contactsync-professional.service
+AUTOMATION_SERVICE=contactsync-automation.service
 TMP_DIR=""
 
 usage() {
@@ -89,18 +93,31 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
+# Beide Prozesse können dieselbe SQLite-Datenbank verwenden. Für ein konsistentes
+# Upgrade werden deshalb Webdienst und Automation-Worker vor der Sicherung gestoppt.
+systemctl stop "$AUTOMATION_SERVICE" 2>/dev/null || true
+systemctl stop "$MAIN_SERVICE" 2>/dev/null || true
+mkdir -p "$DATA_DIR"
+if [[ -f "$DB_FILE" ]]; then
+  cp -a "$DB_FILE" "$DB_BACKUP"
+  echo "Datenbank-Sicherheitskopie: $DB_BACKUP"
+fi
+
 # Bestehende Datenbank und Konfiguration unter /var/lib bleiben erhalten.
 # Wichtig: Das virtuelle Environment wird erst NACH dem finalen Verschieben
 # unter APP_DIR erzeugt. Python-Entry-Points enthalten absolute Shebang-Pfade
 # und dürfen deshalb nicht aus APP_DIR.new verschoben werden.
-systemctl stop contactsync-professional.service 2>/dev/null || true
 rm -rf "$APP_DIR.new" "$APP_DIR.old"
-mkdir -p "$APP_DIR.new" "$DATA_DIR"
+mkdir -p "$APP_DIR.new"
 cp -a "$SOURCE/contactsync" "$SOURCE/pyproject.toml" "$APP_DIR.new/"
 [[ -d "$SOURCE/packaging" ]] && cp -a "$SOURCE/packaging" "$APP_DIR.new/"
 
 [[ -f "$APP_DIR.new/packaging/contactsync-professional.service" ]] || {
   echo "Systemd-Service-Datei fehlt im GitHub-Stand." >&2
+  exit 1
+}
+[[ -f "$APP_DIR.new/packaging/contactsync-automation.service" ]] || {
+  echo "Automation-Service-Datei fehlt im GitHub-Stand." >&2
   exit 1
 }
 
@@ -109,11 +126,19 @@ mv "$APP_DIR.new" "$APP_DIR"
 
 rollback() {
   echo "Installation fehlgeschlagen; vorherigen Programmstand wiederherstellen ..." >&2
+  systemctl stop "$AUTOMATION_SERVICE" 2>/dev/null || true
+  systemctl stop "$MAIN_SERVICE" 2>/dev/null || true
   rm -rf "$APP_DIR"
   if [[ -d "$APP_DIR.old" ]]; then
     mv "$APP_DIR.old" "$APP_DIR"
+    [[ -f "$APP_DIR/packaging/contactsync-professional.service" ]] && install -m 0644 "$APP_DIR/packaging/contactsync-professional.service" "/etc/systemd/system/$MAIN_SERVICE"
+    [[ -f "$APP_DIR/packaging/contactsync-automation.service" ]] && install -m 0644 "$APP_DIR/packaging/contactsync-automation.service" "/etc/systemd/system/$AUTOMATION_SERVICE"
     systemctl daemon-reload || true
-    systemctl restart contactsync-professional.service || true
+    systemctl restart "$MAIN_SERVICE" || true
+    systemctl restart "$AUTOMATION_SERVICE" 2>/dev/null || true
+  fi
+  if [[ -f "$DB_BACKUP" ]]; then
+    echo "Hinweis: Datenbank-Sicherheitskopie bleibt erhalten: $DB_BACKUP" >&2
   fi
 }
 
@@ -128,24 +153,33 @@ if [[ "$(head -n 1 "$APP_DIR/venv/bin/contactsync-professional")" != "#!$APP_DIR
   rollback
   exit 1
 fi
+if [[ "$(head -n 1 "$APP_DIR/venv/bin/contactsync-automation")" != "#!$APP_DIR/venv/bin/"* ]]; then
+  echo "Ungültiger Interpreterpfad im ContactSync-Automation-Startskript." >&2
+  rollback
+  exit 1
+fi
 
-install -m 0644 "$APP_DIR/packaging/contactsync-professional.service" /etc/systemd/system/contactsync-professional.service
-rm -rf "$APP_DIR.old"
+install -m 0644 "$APP_DIR/packaging/contactsync-professional.service" "/etc/systemd/system/$MAIN_SERVICE"
+install -m 0644 "$APP_DIR/packaging/contactsync-automation.service" "/etc/systemd/system/$AUTOMATION_SERVICE"
 
 chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
 chmod 0750 "$DATA_DIR"
 
 systemctl daemon-reload
-systemctl enable contactsync-professional.service
-systemctl restart contactsync-professional.service
+systemctl enable "$MAIN_SERVICE"
+systemctl enable "$AUTOMATION_SERVICE"
+if ! systemctl restart "$MAIN_SERVICE"; then rollback; exit 1; fi
+if ! systemctl restart "$AUTOMATION_SERVICE"; then rollback; exit 1; fi
 
 for _ in {1..20}; do
   if curl -fsS http://127.0.0.1:8000/health >/tmp/contactsync-health.json 2>/dev/null; then
+    rm -rf "$APP_DIR.old"
     echo
     echo "Installation erfolgreich."
     cat /tmp/contactsync-health.json
     echo
     echo "Health-Check: http://127.0.0.1:8000/health"
+    [[ -f "$DB_BACKUP" ]] && echo "Upgrade-Backup: $DB_BACKUP"
     [[ "$REF" == "$TEST_BRANCH" ]] && echo "Hinweis: Installiert ist der 3.5.4-Teststand; noch nicht für Produktion freigegeben."
     exit 0
   fi
@@ -153,6 +187,7 @@ for _ in {1..20}; do
 done
 
 echo "ContactSync wurde installiert, der Health-Check ist aber fehlgeschlagen." >&2
-systemctl --no-pager --full status contactsync-professional.service || true
-journalctl -u contactsync-professional.service -n 50 --no-pager || true
+systemctl --no-pager --full status "$MAIN_SERVICE" || true
+journalctl -u "$MAIN_SERVICE" -n 50 --no-pager || true
+rollback
 exit 1
