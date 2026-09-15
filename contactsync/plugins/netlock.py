@@ -31,6 +31,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
     def _attach_routes() -> None:
         try:
             from contactsync.customer_overview import router as customer_router
+            from contactsync.device_detail import router as detail_router
             from contactsync.device_page import router as page_router
             from contactsync.main import app
             from contactsync.rmm_api import router as api_router
@@ -40,6 +41,8 @@ class NetLockRMMPlugin(ConnectorPlugin):
             app.include_router(api_router)
         if not any(getattr(route, "path", "") == "/devices" for route in app.routes):
             app.include_router(page_router)
+        if not any(getattr(route, "path", "") == "/devices/{device_id}" for route in app.routes):
+            app.include_router(detail_router)
         if not any(getattr(route, "path", "") == "/api/v1/customers/{customer_id}/overview" for route in app.routes):
             app.include_router(customer_router)
 
