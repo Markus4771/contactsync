@@ -120,8 +120,8 @@ def test_device_import_and_glpi_link():
         customer = client.post("/api/v1/customers", json={"customer_number": "RMM-100", "name": "RMM Testkunde"})
         assert customer.status_code in {201, 409}
         imported = client.post("/api/v1/devices/import", json={"source": "netlock", "external_id": "device-100", "customer_number": "RMM-100", "hostname": "RMM-PC-100", "online_status": "offline"})
-        assert imported.status_code == 201
+        assert imported.status_code == 201, imported.text
         device_id = imported.json()["device"]["id"]
         linked = client.patch(f"/api/v1/devices/{device_id}/glpi", json={"glpi_asset_id": "Computer:100"})
-        assert linked.status_code == 200
+        assert linked.status_code == 200, linked.text
         assert linked.json()["glpi_asset_id"] == "Computer:100"
