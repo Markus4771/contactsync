@@ -6,7 +6,16 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from contactsync import database
+
 MAX_RETRIES = max(1, int(os.getenv("CONTACTSYNC_AUTOMATION_MAX_RETRIES", "8")))
+
+# Backwards-compatible override points. Older tests and integrations may
+# monkeypatch these names. When untouched, the central database module resolves
+# CONTACTSYNC_DATA_DIR / CONTACTSYNC_DB dynamically at call time.
+DATA_DIR, DB_PATH = database.paths()
+_INITIAL_DATA_DIR = DATA_DIR
+_INITIAL_DB_PATH = DB_PATH
 
 
 def now() -> datetime:
@@ -18,13 +27,17 @@ def now_iso() -> str:
 
 
 def _paths() -> tuple[Path, Path]:
-    data_dir = Path(os.getenv("CONTACTSYNC_DATA_DIR", "/var/lib/contactsync-professional"))
-    db_path = Path(os.getenv("CONTACTSYNC_DB", str(data_dir / "contactsync.db")))
-    return data_dir, db_path
+    if Path(DATA_DIR) != Path(_INITIAL_DATA_DIR) or Path(DB_PATH) != Path(_INITIAL_DB_PATH):
+        return Path(DATA_DIR), Path(DB_PATH)
+    return database.paths()
 
 
 def connect() -> sqlite3.Connection:
     data_dir, db_path = _paths()
+    # Keep the central resolver authoritative for normal operation, while
+    # preserving explicit legacy/test overrides of DATA_DIR and DB_PATH.
+    if (data_dir, db_path) == database.paths():
+        return database.connect(timeout=30)
     data_dir.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(db_path, timeout=30)
     connection.row_factory = sqlite3.Row
@@ -47,11 +60,16 @@ def retry_at(attempts: int) -> str:
 
 
 def init_schema() -> None:
-    # The base schema belongs to main.init_db. Calling it here makes the
-    # automation migration safe even when tests/workers switch CONTACTSYNC_DB
-    # after modules have already been imported.
-    from contactsync.main import init_db
-    init_db()
+    # main.py still owns the base schema during the 3.5.x migration. Point its
+    # compatibility globals at the same resolved database before initializing,
+    # so API, worker and automation schemas can never land in different files.
+    from contactsync import main
+
+    data_dir, db_path = _paths()
+    main.DATA_DIR = data_dir
+    main.DB_PATH = db_path
+    main.init_db()
+
     with connect() as connection:
         connection.executescript("""
             CREATE TABLE IF NOT EXISTS automation_events (id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,entity_type TEXT NOT NULL,entity_id INTEGER,payload_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'queued',attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at TEXT,last_error TEXT,created_at TEXT NOT NULL,delivered_at TEXT);
@@ -85,9 +103,11 @@ def emit_event(event_type: str, entity_type: str, entity_id: int | None, payload
     init_schema()
     with connect() as connection:
         cursor = connection.execute("INSERT INTO automation_events(event_type,entity_type,entity_id,payload_json,status,created_at) VALUES(?,?,?,?,?,?)", (event_type, entity_type, entity_id, json.dumps(payload, ensure_ascii=False), "queued", now_iso()))
+        connection.commit()
         return int(cursor.lastrowid)
 
 
 def record_error(component: str, reference_id: int | None, message: str) -> None:
     with connect() as connection:
         connection.execute("INSERT INTO automation_errors(component,reference_id,message,created_at) VALUES(?,?,?,?)", (component, reference_id, message[:2000], now_iso()))
+        connection.commit()
