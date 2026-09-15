@@ -90,25 +90,46 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
 fi
 
 # Bestehende Datenbank und Konfiguration unter /var/lib bleiben erhalten.
+# Wichtig: Das virtuelle Environment wird erst NACH dem finalen Verschieben
+# unter APP_DIR erzeugt. Python-Entry-Points enthalten absolute Shebang-Pfade
+# und dürfen deshalb nicht aus APP_DIR.new verschoben werden.
 systemctl stop contactsync-professional.service 2>/dev/null || true
-rm -rf "$APP_DIR.new"
+rm -rf "$APP_DIR.new" "$APP_DIR.old"
 mkdir -p "$APP_DIR.new" "$DATA_DIR"
 cp -a "$SOURCE/contactsync" "$SOURCE/pyproject.toml" "$APP_DIR.new/"
 [[ -d "$SOURCE/packaging" ]] && cp -a "$SOURCE/packaging" "$APP_DIR.new/"
-
-python3 -m venv "$APP_DIR.new/venv"
-"$APP_DIR.new/venv/bin/pip" install --upgrade pip
-"$APP_DIR.new/venv/bin/pip" install "$APP_DIR.new"
 
 [[ -f "$APP_DIR.new/packaging/contactsync-professional.service" ]] || {
   echo "Systemd-Service-Datei fehlt im GitHub-Stand." >&2
   exit 1
 }
-install -m 0644 "$APP_DIR.new/packaging/contactsync-professional.service" /etc/systemd/system/contactsync-professional.service
 
-rm -rf "$APP_DIR.old"
 [[ -d "$APP_DIR" ]] && mv "$APP_DIR" "$APP_DIR.old"
 mv "$APP_DIR.new" "$APP_DIR"
+
+rollback() {
+  echo "Installation fehlgeschlagen; vorherigen Programmstand wiederherstellen ..." >&2
+  rm -rf "$APP_DIR"
+  if [[ -d "$APP_DIR.old" ]]; then
+    mv "$APP_DIR.old" "$APP_DIR"
+    systemctl daemon-reload || true
+    systemctl restart contactsync-professional.service || true
+  fi
+}
+
+if ! python3 -m venv "$APP_DIR/venv"; then rollback; exit 1; fi
+if ! "$APP_DIR/venv/bin/pip" install --upgrade pip; then rollback; exit 1; fi
+if ! "$APP_DIR/venv/bin/pip" install "$APP_DIR"; then rollback; exit 1; fi
+
+# Fail fast if packaging created a broken console entry point.
+if ! "$APP_DIR/venv/bin/python" -c "from contactsync.runner import main"; then rollback; exit 1; fi
+if [[ "$(head -n 1 "$APP_DIR/venv/bin/contactsync-professional")" != "#!$APP_DIR/venv/bin/"* ]]; then
+  echo "Ungültiger Interpreterpfad im ContactSync-Startskript." >&2
+  rollback
+  exit 1
+fi
+
+install -m 0644 "$APP_DIR/packaging/contactsync-professional.service" /etc/systemd/system/contactsync-professional.service
 rm -rf "$APP_DIR.old"
 
 chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
