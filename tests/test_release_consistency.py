@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_version_metadata_is_consistent():
     version = (ROOT / "version.txt").read_text(encoding="utf-8").strip()
-    assert version == "3.5.1"
+    assert version == "3.5.4"
 
     init_text = (ROOT / "contactsync" / "__init__.py").read_text(encoding="utf-8")
     match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
