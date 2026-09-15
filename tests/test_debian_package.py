@@ -9,8 +9,8 @@ def test_debian_release_contract():
     assert (ROOT / "debian/postinst").is_file()
     assert (ROOT / "packaging/contactsync-automation.service").is_file()
     manifest = (ROOT / "projekt.yaml").read_text(encoding="utf-8")
-    assert "version: 3.5.1" in manifest
-    assert "contactsync-professional_3.5.1_all.deb" in manifest
+    assert "version: 3.5.4" in manifest
+    assert "contactsync-professional_3.5.4_all.deb" in manifest
     assert "automation_worker: systemd" in manifest
     assert "procurement_bridge: cli-events" in manifest
     assert "procurement_events: true" in manifest
