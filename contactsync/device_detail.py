@@ -6,8 +6,6 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from contactsync.rmm_api import get_device
-
 router = APIRouter(tags=["devices-ui"])
 
 
@@ -17,6 +15,11 @@ def _e(value: Any) -> str:
 
 @router.get("/devices/{device_id}", response_class=HTMLResponse)
 def device_detail_page(device_id: int) -> str:
+    # Lazy import is intentional: importing rmm_api while contactsync.main is
+    # still initializing creates an import-order dependency and caused this
+    # route to be skipped on the first PluginManager initialization.
+    from contactsync.rmm_api import get_device
+
     d = get_device(device_id)
     customer_link = (
         f"<a href='/customers/{d['customer_id']}'>{_e(d.get('customer_number'))} · {_e(d.get('customer_name'))}</a>"
