@@ -33,6 +33,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
             from contactsync.customer_overview import router as customer_router
             from contactsync.device_detail import router as detail_router
             from contactsync.device_page import router as page_router
+            from contactsync.incidents_page import router as incidents_router
             from contactsync.main import app
             from contactsync.rmm_api import router as api_router
         except ImportError:
@@ -45,6 +46,8 @@ class NetLockRMMPlugin(ConnectorPlugin):
             app.include_router(detail_router)
         if not any(getattr(route, "path", "") == "/api/v1/customers/{customer_id}/overview" for route in app.routes):
             app.include_router(customer_router)
+        if not any(getattr(route, "path", "") == "/api/v1/incidents" for route in app.routes):
+            app.include_router(incidents_router)
 
     def connection_hint(self) -> str:
         return "NetLock Server-URL und API-Token eintragen. API-Endpunkte werden erst nach Verifikation aktiviert."
