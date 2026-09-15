@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from contactsync import database
 from contactsync.monitoring_core import init_monitoring_schema
 from contactsync.rmm_core import init_rmm_schema, now_iso, upsert_device
 
@@ -35,13 +36,14 @@ class GLPILink(BaseModel):
 
 
 def _db() -> sqlite3.Connection:
-    # main owns the application database path for the lifetime of the process.
-    # All RMM operations deliberately use exactly that database.
-    from contactsync.main import DB_PATH, DATA_DIR
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys=ON")
+    """Open the one canonical ContactSync database.
+
+    RMM used to import contactsync.main.DB_PATH directly while automation and
+    monitoring used contactsync.database.  During test collection/import-order
+    changes those paths could diverge.  All RMM reads and writes now go through
+    the central database provider.
+    """
+    connection = database.connect(timeout=30)
     init_rmm_schema(connection)
     init_monitoring_schema(connection)
     return connection
@@ -109,10 +111,6 @@ def list_devices(
     sql = _device_list_sql()
     params: list[Any] = []
     if customer_number:
-        # A managed device retains the customer number received from the RMM.
-        # customer_id is the normalized relation when the customer already
-        # exists. Accept either representation so imports remain queryable
-        # during/after customer reconciliation and legacy migrations.
         sql += " AND (d.customer_number=? OR c.customer_number=?)"
         params.extend([customer_number, customer_number])
     if online_status:
@@ -177,10 +175,7 @@ def unlink_glpi_asset(device_id: int) -> dict[str, Any]:
 @router.get("/{device_id}")
 def get_device(device_id: int) -> dict[str, Any]:
     with _db() as connection:
-        base = connection.execute(
-            _device_list_sql() + " AND d.id=?",
-            (device_id,),
-        ).fetchone()
+        base = connection.execute(_device_list_sql() + " AND d.id=?", (device_id,)).fetchone()
         if base is None:
             raise HTTPException(404, "Gerät nicht gefunden")
         device = dict(base)
