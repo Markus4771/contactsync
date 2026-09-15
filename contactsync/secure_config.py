@@ -43,8 +43,28 @@ def protected_json(config: dict[str, Any]) -> str:
     return json.dumps(protect_config(config), ensure_ascii=False)
 
 
+def ensure_platform_schemas(connection) -> None:
+    """Ensure extension tables live in the same canonical database as core data.
+
+    init_db() already owns the canonical connection and calls the connector
+    migration during startup. Keeping extension schema creation on that same
+    connection prevents RMM imports and GLPI links from ending up in different
+    SQLite files when tests or services override database paths.
+    """
+    from contactsync.monitoring_core import init_monitoring_schema
+    from contactsync.rmm_core import init_rmm_schema
+
+    init_rmm_schema(connection)
+    init_monitoring_schema(connection)
+
+
 def migrate_connector_secrets(connection) -> int:
     """Encrypt legacy plaintext secrets in-place without changing connector semantics."""
+    # This migration is invoked from the canonical init_db() path.  Ensure all
+    # platform schemas are initialized on that exact connection before routes
+    # begin serving requests.
+    ensure_platform_schemas(connection)
+
     changed = 0
     rows = connection.execute("SELECT key,config_json FROM connectors").fetchall()
     for row in rows:
