@@ -9,8 +9,8 @@ def test_debian_release_contract():
     assert (ROOT / "debian/postinst").is_file()
     assert (ROOT / "packaging/contactsync-automation.service").is_file()
     manifest = (ROOT / "projekt.yaml").read_text(encoding="utf-8")
-    assert "version: 3.5.0" in manifest
-    assert "contactsync-professional_3.5.0_all.deb" in manifest
+    assert "version: 3.5.1" in manifest
+    assert "contactsync-professional_3.5.1_all.deb" in manifest
     assert "automation_worker: systemd" in manifest
     assert "procurement_bridge: cli-events" in manifest
     assert "procurement_events: true" in manifest
@@ -27,6 +27,10 @@ def test_debian_release_contract():
     assert "netlock_transport: pending-verification" in manifest
     assert "monitoring: true" in manifest
     assert "checkmk_transport: rest-v1" in manifest
+    assert "customer_device_overview: true" in manifest
+    assert "incident_overview: true" in manifest
+    assert "monitoring_automation_ui: true" in manifest
+    assert "connector_status_ui: true" in manifest
     assert "- glpi" in manifest
     assert "- netlock" in manifest
     assert "- checkmk" in manifest
