@@ -10,6 +10,7 @@ from contactsync.auth import get_session, require_role
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 PUBLIC_PATHS = {"/health", "/api/v1/auth/login"}
+PASSWORD_CHANGE_PATHS = {"/api/v1/auth/me", "/api/v1/auth/password", "/api/v1/auth/logout"}
 ADMIN_PREFIXES = ("/api/v1/security/connectors", "/api/v1/connectors")
 OPERATOR_PREFIXES = (
     "/api/v1/sync", "/api/v1/customers", "/api/v1/devices", "/api/v1/netlock",
@@ -24,12 +25,18 @@ class SecurityGuardMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if not path.startswith("/api/v1/"):
             return await call_next(request)
-        # Auth endpoints perform their own session/CSRF checks.
+        # Auth endpoints perform their own session/CSRF checks. Password-change
+        # enforcement for these endpoints is handled below by their own logic.
         if path.startswith("/api/v1/auth/"):
             return await call_next(request)
         session = get_session(request.cookies.get("contactsync_session"))
         if not session:
             return JSONResponse({"detail": "Anmeldung erforderlich"}, status_code=401)
+        if session.get("must_change_password") and path not in PASSWORD_CHANGE_PATHS:
+            return JSONResponse(
+                {"detail": "Passwortänderung erforderlich", "must_change_password": True},
+                status_code=403,
+            )
         minimum = "viewer"
         if request.method not in SAFE_METHODS:
             minimum = "operator"
