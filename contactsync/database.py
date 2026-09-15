@@ -8,12 +8,17 @@ from typing import Iterator
 
 DEFAULT_DATA_DIR = Path("/var/lib/contactsync-professional")
 
+# Resolve once per process.  ContactSync is a single-database application and
+# modules/tests may change environment variables while being imported.  A
+# dynamic resolver made different subsystems silently switch SQLite files in
+# the same process (for example RMM import vs. GLPI linking).
+_INITIAL_DATA_DIR = Path(os.getenv("CONTACTSYNC_DATA_DIR", str(DEFAULT_DATA_DIR)))
+_INITIAL_DB_PATH = Path(os.getenv("CONTACTSYNC_DB", str(_INITIAL_DATA_DIR / "contactsync.db")))
+
 
 def paths() -> tuple[Path, Path]:
-    """Resolve database paths at call time so tests, workers and services share one source of truth."""
-    data_dir = Path(os.getenv("CONTACTSYNC_DATA_DIR", str(DEFAULT_DATA_DIR)))
-    db_path = Path(os.getenv("CONTACTSYNC_DB", str(data_dir / "contactsync.db")))
-    return data_dir, db_path
+    """Return the canonical database paths for the current process."""
+    return _INITIAL_DATA_DIR, _INITIAL_DB_PATH
 
 
 def data_dir() -> Path:
