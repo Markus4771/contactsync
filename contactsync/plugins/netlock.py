@@ -11,16 +11,7 @@ from contactsync.plugins import netlock_runtime
 class NetLockRMMPlugin(ConnectorPlugin):
     """NetLock RMM integration through the documented public REST API."""
 
-    metadata = PluginMetadata(
-        key="netlock",
-        title="NetLock RMM",
-        version="1.1.0",
-        capabilities=("devices.read", "device.status", "device.customfields.read", "device.customfields.write", "customers.link", "glpi.link"),
-        description="RMM-Geräte, Agentstatus, Custom Fields und Kundenzuordnung über die NetLock Public API.",
-        automation_events=("device.new", "device.offline", "device.customer_changed"),
-        required_config=("url", "api_token"),
-        category="rmm",
-    )
+    metadata = PluginMetadata(key="netlock", title="NetLock RMM", version="1.1.0", capabilities=("devices.read", "device.status", "device.customfields.read", "device.customfields.write", "customers.link", "glpi.link"), description="RMM-Geräte, Agentstatus, Custom Fields und Kundenzuordnung über die NetLock Public API.", automation_events=("device.new", "device.offline", "device.customer_changed"), required_config=("url", "api_token"), category="rmm")
 
     def __init__(self) -> None:
         pass
@@ -34,6 +25,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
         route_modules = (
             ("contactsync.rmm_api", "/api/v1/devices"),
             ("contactsync.netlock_api", "/api/v1/netlock/import-devices"),
+            ("contactsync.security_api", "/api/v1/auth/login"),
             ("contactsync.device_page", "/devices"),
             ("contactsync.customer_overview", "/api/v1/customers/{customer_id}/overview"),
             ("contactsync.incidents_page", "/api/v1/incidents"),
