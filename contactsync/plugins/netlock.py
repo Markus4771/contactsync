@@ -34,6 +34,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
         route_modules = (
             ("contactsync.rmm_api", "/api/v1/devices"),
             ("contactsync.netlock_api", "/api/v1/netlock/import-devices"),
+            ("contactsync.asset_api", "/api/v1/assets"),
             ("contactsync.device_page", "/devices"),
             ("contactsync.customer_overview", "/api/v1/customers/{customer_id}/overview"),
             ("contactsync.incidents_page", "/api/v1/incidents"),
