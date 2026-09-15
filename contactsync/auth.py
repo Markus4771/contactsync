@@ -10,7 +10,10 @@ from contactsync.security import hash_password, verify_password
 
 ROLES = ("viewer", "operator", "administrator")
 ROLE_LEVEL = {"viewer": 10, "operator": 20, "administrator": 30}
+ROLE_LABELS = {"viewer": "Viewer", "operator": "Operator", "administrator": "Admin"}
 SESSION_HOURS = 12
+BOOTSTRAP_USERNAME = "admin"
+BOOTSTRAP_PASSWORD = "admin123"
 
 
 def now_iso() -> str:
@@ -44,6 +47,32 @@ def init_auth_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
             """
         )
+
+
+def _bootstrap_password_hash(password: str) -> str:
+    """Hash the legacy first-login password without weakening normal policy.
+
+    hash_password deliberately rejects passwords shorter than ten characters.
+    The historical admin/admin123 credential is accepted only here and is
+    always marked for mandatory replacement after the first login.
+    """
+    salt = secrets.token_bytes(16)
+    derived = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return f"scrypt$16384$8$1${salt.hex()}${derived.hex()}"
+
+
+def ensure_bootstrap_admin() -> bool:
+    """Create admin/admin123 only when the installation contains no users."""
+    init_auth_schema()
+    with connect() as connection:
+        if connection.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+            return False
+        stamp = now_iso()
+        connection.execute(
+            "INSERT INTO users(username,password_hash,role,enabled,must_change_password,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (BOOTSTRAP_USERNAME, _bootstrap_password_hash(BOOTSTRAP_PASSWORD), "administrator", 1, 1, stamp, stamp),
+        )
+        return True
 
 
 def create_user(username: str, password: str, role: str = "viewer", *, must_change_password: bool = False) -> int:
