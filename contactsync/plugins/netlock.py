@@ -5,30 +5,24 @@ from typing import Any
 
 from contactsync.plugins.base import ConnectorPlugin, PluginMetadata
 from contactsync.plugins.contracts import ConnectionTestResult
+from contactsync.plugins import netlock_runtime
 
 
 class NetLockRMMPlugin(ConnectorPlugin):
-    """NetLock RMM integration boundary.
-
-    ContactSync provides the device model and API. Provider-specific network
-    calls remain disabled until the deployed NetLock API contract is verified.
-    """
+    """NetLock RMM integration through the documented public REST API."""
 
     metadata = PluginMetadata(
         key="netlock",
         title="NetLock RMM",
-        version="1.0.0",
-        capabilities=("devices.read", "device.status", "customers.link", "glpi.link"),
-        description="RMM-Geräte, Agentstatus und Kundenzuordnung für ContactSync.",
+        version="1.1.0",
+        capabilities=("devices.read", "device.status", "device.customfields.read", "device.customfields.write", "customers.link", "glpi.link"),
+        description="RMM-Geräte, Agentstatus, Custom Fields und Kundenzuordnung über die NetLock Public API.",
         automation_events=("device.new", "device.offline", "device.customer_changed"),
         required_config=("url", "api_token"),
         category="rmm",
     )
 
     def __init__(self) -> None:
-        # Route registration is deliberately deferred to PluginManager after
-        # all plugins are initialized. Importing contactsync.main here can see
-        # a partially initialized module and omit routes on the first startup.
         pass
 
     @staticmethod
@@ -37,7 +31,6 @@ class NetLockRMMPlugin(ConnectorPlugin):
             from contactsync.main import app
         except (ImportError, AttributeError):
             return
-
         route_modules = (
             ("contactsync.rmm_api", "/api/v1/devices"),
             ("contactsync.device_page", "/devices"),
@@ -54,10 +47,6 @@ class NetLockRMMPlugin(ConnectorPlugin):
             except (ImportError, AttributeError):
                 continue
             app.include_router(router)
-
-        # The device detail endpoint is an application UI route rather than a
-        # provider transport endpoint. Register it explicitly after the other
-        # RMM routes so its availability does not depend on router import order.
         detail_path = "/devices/{device_id}"
         if not any(getattr(route, "path", "") == detail_path for route in app.routes):
             try:
@@ -65,22 +54,32 @@ class NetLockRMMPlugin(ConnectorPlugin):
                 endpoint = getattr(detail_module, "device_detail_page")
             except (ImportError, AttributeError):
                 return
-            app.add_api_route(
-                detail_path,
-                endpoint,
-                methods=["GET"],
-                response_class=getattr(detail_module, "HTMLResponse"),
-                tags=["devices-ui"],
-            )
+            app.add_api_route(detail_path, endpoint, methods=["GET"], response_class=getattr(detail_module, "HTMLResponse"), tags=["devices-ui"])
 
     def connection_hint(self) -> str:
-        return "NetLock Server-URL und API-Token eintragen. API-Endpunkte werden erst nach Verifikation aktiviert."
+        return "NetLock Public API aktivieren, unter Einstellungen → API tokens einen Bearer-Token erzeugen und Server-URL sowie Token eintragen."
 
     async def test_connection(self, config: dict[str, Any]) -> ConnectionTestResult:
         errors = self.validate_config(config)
         if errors:
             return ConnectionTestResult(ok=False, message="; ".join(errors))
-        return ConnectionTestResult(
-            ok=False,
-            message="NetLock Transport noch nicht aktiviert: API-Vertrag muss gegen die eingesetzte NetLock-Version verifiziert werden.",
-        )
+        try:
+            ok, message = await netlock_runtime.test_connection(config)
+            return ConnectionTestResult(ok=ok, message=message)
+        except Exception as exc:
+            return ConnectionTestResult(ok=False, message=f"NetLock-Verbindung fehlgeschlagen: {exc}")
+
+    async def fetch_devices(self, config: dict[str, Any]) -> list[dict[str, Any]]:
+        errors = self.validate_config(config)
+        if errors:
+            raise ValueError("; ".join(errors))
+        return await netlock_runtime.fetch_devices(config)
+
+    async def get_device(self, config: dict[str, Any], device_id: str | int) -> dict[str, Any]:
+        return await netlock_runtime.get_device(config, device_id)
+
+    async def get_custom_fields(self, config: dict[str, Any], device_id: str | int, *, effective: bool = False) -> dict[str, Any]:
+        return await netlock_runtime.get_custom_fields(config, device_id, effective=effective)
+
+    async def set_custom_fields(self, config: dict[str, Any], device_id: str | int, values: dict[str, Any]) -> dict[str, Any]:
+        return await netlock_runtime.set_custom_fields(config, device_id, values)
