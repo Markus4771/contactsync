@@ -52,20 +52,52 @@ def init_rmm_schema(connection: sqlite3.Connection) -> None:
     )
 
 
-def resolve_customer(connection: sqlite3.Connection, customer_number: str | None) -> int | None:
-    if not customer_number:
+def normalize_customer_number(customer_number: Any) -> str | None:
+    """Return the canonical customer number used for device relationships."""
+    if customer_number is None:
+        return None
+    value = str(customer_number).strip()
+    return value or None
+
+
+def resolve_customer(connection: sqlite3.Connection, customer_number: Any) -> int | None:
+    """Resolve a ContactSync customer by its business customer number.
+
+    Customer numbers can arrive from external RMM systems with surrounding
+    whitespace or non-string JSON types.  Normalize them before both lookup and
+    persistence so customer_id and customer_number cannot silently diverge.
+    """
+    normalized = normalize_customer_number(customer_number)
+    if normalized is None:
         return None
     row = connection.execute(
-        "SELECT id FROM customers WHERE customer_number=?", (customer_number,)
+        "SELECT id FROM customers WHERE TRIM(CAST(customer_number AS TEXT))=? ORDER BY id LIMIT 1",
+        (normalized,),
     ).fetchone()
     return int(row[0]) if row else None
+
+
+def repair_customer_link(connection: sqlite3.Connection, device_id: int) -> int | None:
+    """Repair a missing normalized customer_id from the stored customer number."""
+    row = connection.execute(
+        "SELECT customer_id,customer_number FROM managed_devices WHERE id=?", (device_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    customer_id = resolve_customer(connection, row["customer_number"])
+    if customer_id != row["customer_id"]:
+        connection.execute(
+            "UPDATE managed_devices SET customer_id=?,updated_at=? WHERE id=?",
+            (customer_id, now_iso(), device_id),
+        )
+    return customer_id
 
 
 def upsert_device(connection: sqlite3.Connection, device: dict[str, Any]) -> tuple[int, list[str]]:
     source = str(device.get("source") or "netlock")
     external_id = str(device["external_id"])
     hostname = str(device.get("hostname") or external_id)
-    customer_number = device.get("customer_number")
+    customer_number = normalize_customer_number(device.get("customer_number"))
     customer_id = resolve_customer(connection, customer_number)
     existing = connection.execute(
         "SELECT * FROM managed_devices WHERE source=? AND external_id=?", (source, external_id)

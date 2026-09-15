@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import json
-
 from contactsync.automation_core import MAX_RETRIES, connect, emit_event, init_schema, now_iso, record_error, retry_at
 from contactsync.plugins.manager import get_plugin_manager
+from contactsync.secure_config import runtime_config
 
 
 def _connector_config(connection, key: str) -> dict:
     row = connection.execute("SELECT enabled,config_json FROM connectors WHERE key=?", (key,)).fetchone()
     if not row or not row["enabled"]:
         raise RuntimeError(f"Connector {key} ist nicht aktiviert")
-    config = json.loads(row["config_json"] or "{}")
+    config = runtime_config(row["config_json"])
     errors = get_plugin_manager().get(key).validate_config(config)
     if errors:
         raise RuntimeError(f"Connector {key} unvollständig: {', '.join(errors)}")
@@ -46,9 +45,7 @@ async def process_sync_runs_once(limit: int = 3) -> int:
     for run in runs:
         try:
             if not manager.supports_contact_sync(run["source"]) or not manager.supports_contact_sync(run["target"]):
-                raise RuntimeError(
-                    "Ungültiger Kontakt-Sync: RMM- und Monitoring-Plugins dürfen nicht als Quelle oder Ziel verwendet werden"
-                )
+                raise RuntimeError("Ungültiger Kontakt-Sync: RMM- und Monitoring-Plugins dürfen nicht als Quelle oder Ziel verwendet werden")
             with connect() as connection:
                 connection.execute("UPDATE sync_runs SET status='running',last_error=NULL WHERE id=?", (run["id"],))
                 source_config = _connector_config(connection, run["source"])
@@ -64,10 +61,7 @@ async def process_sync_runs_once(limit: int = 3) -> int:
                     continue
                 with connect() as connection:
                     current = _link(connection, run["source"], "customer", source_id, run["target"])
-                if current:
-                    result = await target_plugin.update_customer(target_config, current["target_external_id"], customer)
-                else:
-                    result = await target_plugin.create_customer(target_config, customer)
+                result = await (target_plugin.update_customer(target_config, current["target_external_id"], customer) if current else target_plugin.create_customer(target_config, customer))
                 with connect() as connection:
                     _save_link(connection, run["source"], "customer", source_id, run["target"], result.external_id)
                 processed += 1
@@ -84,28 +78,19 @@ async def process_sync_runs_once(limit: int = 3) -> int:
                         person["customer_external_id"] = parent_link["target_external_id"]
                 with connect() as connection:
                     current = _link(connection, run["source"], "person", source_id, run["target"])
-                if current:
-                    result = await target_plugin.update_person(target_config, current["target_external_id"], person)
-                else:
-                    result = await target_plugin.create_person(target_config, person)
+                result = await (target_plugin.update_person(target_config, current["target_external_id"], person) if current else target_plugin.create_person(target_config, person))
                 with connect() as connection:
                     _save_link(connection, run["source"], "person", source_id, run["target"], result.external_id)
                 processed += 1
             with connect() as connection:
-                connection.execute(
-                    "UPDATE sync_runs SET status='completed',processed=?,finished_at=?,last_error=NULL WHERE id=?",
-                    (processed, now_iso(), run["id"]),
-                )
+                connection.execute("UPDATE sync_runs SET status='completed',processed=?,finished_at=?,last_error=NULL WHERE id=?", (processed, now_iso(), run["id"]))
             emit_event("sync.completed", "sync_run", run["id"], {"source": run["source"], "target": run["target"], "processed": processed})
             completed += 1
         except Exception as exc:
             attempts = int(run["attempts"] or 0) + 1
             status = "failed" if attempts >= MAX_RETRIES else "retry"
             with connect() as connection:
-                connection.execute(
-                    "UPDATE sync_runs SET status=?,attempts=?,next_attempt_at=?,last_error=?,finished_at=? WHERE id=?",
-                    (status, attempts, None if status == "failed" else retry_at(attempts), str(exc)[:2000], now_iso() if status == "failed" else None, run["id"]),
-                )
+                connection.execute("UPDATE sync_runs SET status=?,attempts=?,next_attempt_at=?,last_error=?,finished_at=? WHERE id=?", (status, attempts, None if status == "failed" else retry_at(attempts), str(exc)[:2000], now_iso() if status == "failed" else None, run["id"]))
             record_error("sync", run["id"], str(exc))
             emit_event("sync.failed" if status == "failed" else "sync.retry", "sync_run", run["id"], {"error": str(exc), "attempts": attempts})
     return completed

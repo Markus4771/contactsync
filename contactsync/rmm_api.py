@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from contactsync import database
 from contactsync.monitoring_core import init_monitoring_schema
 from contactsync.rmm_core import init_rmm_schema, now_iso, upsert_device
 
@@ -35,11 +36,18 @@ class GLPILink(BaseModel):
 
 
 def _db() -> sqlite3.Connection:
-    from contactsync.main import DB_PATH, DATA_DIR
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys=ON")
+    """Open the one canonical ContactSync database.
+
+    main.py is still the application bootstrap for 3.5.x and resolves the
+    deployment/test paths first.  Synchronize the central provider with those
+    paths before opening the RMM connection.  This removes the remaining
+    import-order split where customer writes and RMM reads could use different
+    SQLite files.
+    """
+    from contactsync import main as application
+
+    database.configure(directory=application.DATA_DIR, database=application.DB_PATH)
+    connection = database.connect(timeout=30)
     init_rmm_schema(connection)
     init_monitoring_schema(connection)
     return connection
@@ -107,8 +115,8 @@ def list_devices(
     sql = _device_list_sql()
     params: list[Any] = []
     if customer_number:
-        sql += " AND d.customer_number=?"
-        params.append(customer_number)
+        sql += " AND (d.customer_number=? OR c.customer_number=?)"
+        params.extend([customer_number, customer_number])
     if online_status:
         sql += " AND d.online_status=?"
         params.append(online_status)
@@ -125,30 +133,6 @@ def list_devices(
     sql += " ORDER BY d.hostname COLLATE NOCASE"
     with _db() as connection:
         return [dict(row) for row in connection.execute(sql, params)]
-
-
-@router.get("/{device_id}")
-def get_device(device_id: int) -> dict[str, Any]:
-    with _db() as connection:
-        base = connection.execute(
-            _device_list_sql() + " AND d.id=?",
-            (device_id,),
-        ).fetchone()
-        if base is None:
-            raise HTTPException(404, "Gerät nicht gefunden")
-        device = dict(base)
-        device["events"] = [dict(row) for row in connection.execute(
-            "SELECT * FROM device_events WHERE device_id=? ORDER BY id DESC LIMIT 50", (device_id,)
-        )]
-        host_id = device.get("monitoring_host_id")
-        if host_id:
-            device["monitoring_services"] = [dict(row) for row in connection.execute(
-                "SELECT * FROM monitoring_services WHERE monitoring_host_id=? ORDER BY state DESC,description COLLATE NOCASE",
-                (host_id,),
-            )]
-        else:
-            device["monitoring_services"] = []
-        return device
 
 
 @router.post("/import", status_code=201)
@@ -190,3 +174,24 @@ def unlink_glpi_asset(device_id: int) -> dict[str, Any]:
         )
         connection.commit()
         return dict(_device_or_404(connection, device_id))
+
+
+@router.get("/{device_id}")
+def get_device(device_id: int) -> dict[str, Any]:
+    with _db() as connection:
+        base = connection.execute(_device_list_sql() + " AND d.id=?", (device_id,)).fetchone()
+        if base is None:
+            raise HTTPException(404, "Gerät nicht gefunden")
+        device = dict(base)
+        device["events"] = [dict(row) for row in connection.execute(
+            "SELECT * FROM device_events WHERE device_id=? ORDER BY id DESC LIMIT 50", (device_id,)
+        )]
+        host_id = device.get("monitoring_host_id")
+        if host_id:
+            device["monitoring_services"] = [dict(row) for row in connection.execute(
+                "SELECT * FROM monitoring_services WHERE monitoring_host_id=? ORDER BY state DESC,description COLLATE NOCASE",
+                (host_id,),
+            )]
+        else:
+            device["monitoring_services"] = []
+        return device
