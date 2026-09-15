@@ -2,8 +2,9 @@ import sqlite3
 
 from fastapi.testclient import TestClient
 
+from contactsync import database
 from contactsync.auth import create_user
-from contactsync.main import DB_PATH, DATA_DIR, app, init_db
+from contactsync.main import app, init_db
 from contactsync.monitoring_core import init_monitoring_schema, refresh_service_counters, upsert_host, upsert_service
 from contactsync.rmm_core import init_rmm_schema
 
@@ -11,24 +12,14 @@ TEST_USER = "device-admin"
 TEST_PASSWORD = "ContactSync-Device-Admin-123!"
 
 
-def _pin_automation_database():
-    from contactsync import automation_core
-    automation_core.DATA_DIR = DATA_DIR
-    automation_core.DB_PATH = DB_PATH
-
-
 def _connection():
-    _pin_automation_database()
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys=ON")
+    connection = database.connect(timeout=30)
     init_rmm_schema(connection)
     init_monitoring_schema(connection)
     return connection
 
 
 def _ensure_test_user():
-    _pin_automation_database()
     init_db()
     try:
         create_user(TEST_USER, TEST_PASSWORD, "administrator")
