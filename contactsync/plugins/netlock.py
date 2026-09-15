@@ -40,6 +40,13 @@ class NetLockRMMPlugin(ConnectorPlugin):
             except (ImportError, AttributeError):
                 continue
             app.include_router(router)
+        if not getattr(app.state, "security_guard_installed", False):
+            try:
+                guard = getattr(import_module("contactsync.security_guard"), "SecurityGuardMiddleware")
+                app.add_middleware(guard)
+                app.state.security_guard_installed = True
+            except (ImportError, AttributeError, RuntimeError):
+                pass
         detail_path = "/devices/{device_id}"
         if not any(getattr(route, "path", "") == detail_path for route in app.routes):
             try:
