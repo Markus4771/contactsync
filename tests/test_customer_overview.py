@@ -1,6 +1,6 @@
 from contactsync.customer_overview import customer_overview
 from contactsync.main import db, init_db
-from contactsync.monitoring_core import init_monitoring_schema, upsert_host, upsert_service
+from contactsync.monitoring_core import init_monitoring_schema, refresh_service_counters, upsert_host, upsert_service
 from contactsync.rmm_core import init_rmm_schema, upsert_device
 
 
@@ -29,6 +29,7 @@ def test_customer_overview_combines_contacts_rmm_glpi_and_checkmk(tmp_path, monk
         upsert_service(connection, host_id, {
             'external_service_id': 'CPU load', 'description': 'CPU load', 'state': 2
         })
+        refresh_service_counters(connection, host_id)
         connection.commit()
 
     result = customer_overview(customer_id)
