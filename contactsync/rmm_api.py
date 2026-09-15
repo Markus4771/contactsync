@@ -107,8 +107,10 @@ def list_devices(
     sql = _device_list_sql()
     params: list[Any] = []
     if customer_number:
-        sql += " AND d.customer_number=?"
-        params.append(customer_number)
+        # customer_id is the canonical relation. Keep the denormalized number
+        # as a fallback for devices imported before the customer existed.
+        sql += " AND (c.customer_number=? OR (c.id IS NULL AND d.customer_number=?))"
+        params.extend([customer_number, customer_number])
     if online_status:
         sql += " AND d.online_status=?"
         params.append(online_status)
