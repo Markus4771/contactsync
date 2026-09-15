@@ -16,7 +16,7 @@ dependencies = [
   "python-multipart>=0.0.9,<1.0",
   "cryptography>=43,<47"
 ]
-scripts = { contactsync-professional = "contactsync.main:run", contactsync-automation = "contactsync.automation_service:main", contactsync-procurement = "contactsync.procurement:main" }
+scripts = { contactsync-professional = "contactsync.runner:main", contactsync-automation = "contactsync.automation_service:main", contactsync-procurement = "contactsync.procurement:main" }
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-asyncio>=0.23"]
