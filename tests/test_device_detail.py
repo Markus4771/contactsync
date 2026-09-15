@@ -6,7 +6,7 @@ def test_device_detail_route_is_registered():
     from contactsync.plugins.manager import PluginManager
     init_db()
     PluginManager()
-    paths = {route.path for route in app.routes}
+    paths = {path for route in app.routes if (path := getattr(route, "path", None))}
     assert "/devices/{device_id}" in paths
 
 
