@@ -20,13 +20,10 @@ BUILTIN_PLUGINS = (
 class PluginManager:
     def __init__(self, specs: Iterable[str] | None = None) -> None:
         self._plugins: dict[str, ConnectorPlugin] = {}
+        self._routes_attached = False
         for spec in specs or BUILTIN_PLUGINS:
             self.register(self._load_spec(spec))
         self._load_external_plugins()
-        # Route hooks must run only after all plugins have been instantiated.
-        # This avoids partially initialized contactsync.main imports during
-        # plugin construction (notably the NetLock device-detail routes).
-        self._attach_plugin_routes()
 
     @staticmethod
     def _load_spec(spec: str) -> ConnectorPlugin:
@@ -43,7 +40,17 @@ class PluginManager:
             plugin_obj = item.load()()
             self.register(plugin_obj)
 
-    def _attach_plugin_routes(self) -> None:
+    def attach_plugin_routes(self) -> None:
+        """Attach plugin route hooks once, after the global manager exists.
+
+        Route hooks are intentionally not executed from __init__.  Some hooks
+        import contactsync.main, which in turn calls get_plugin_manager().
+        Running them during construction can therefore recurse into a second
+        manager or leave FastAPI routes only partially registered.
+        """
+        if self._routes_attached:
+            return
+        self._routes_attached = True
         for plugin in self.all():
             attach_routes = getattr(plugin, "attach_routes", None)
             if callable(attach_routes):
@@ -90,7 +97,11 @@ _MANAGER: PluginManager | None = None
 def get_plugin_manager() -> PluginManager:
     global _MANAGER
     if _MANAGER is None:
-        _MANAGER = PluginManager()
+        # Publish the fully constructed manager before any route hook imports
+        # contactsync.main and asks for the manager again.
+        manager = PluginManager()
+        _MANAGER = manager
+        manager.attach_plugin_routes()
     return _MANAGER
 
 
