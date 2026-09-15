@@ -17,7 +17,7 @@ BUILTIN_PLUGINS = (
 )
 
 PLATFORM_ROUTES = (
-    ("contactsync.rmm_api", "/api/v1/devices"),
+    ("contactsync.rmm_api", "/api/v1/devices/{device_id}/glpi"),
     ("contactsync.netlock_api", "/api/v1/netlock/import-devices"),
     ("contactsync.security_api", "/api/v1/auth/login"),
     ("contactsync.field_mapping_api", "/api/v1/field-mappings"),
@@ -51,9 +51,15 @@ class PluginManager:
         for item in discovered:
             self.register(item.load()())
 
-    def attach_plugin_routes(self) -> None:
-        """Attach platform and plugin routes once main.app exists."""
-        if self._routes_attached:
+    def attach_plugin_routes(self, *, force: bool = False) -> None:
+        """Attach platform and plugin routes once main.app exists.
+
+        ``force`` is used by main after the module has finished declaring the
+        application.  This closes the import-order gap where a recursive plugin
+        lookup can mark an early attachment attempt complete before every
+        platform router is available.
+        """
+        if self._routes_attached and not force:
             return
         try:
             from contactsync.main import app
@@ -76,9 +82,6 @@ class PluginManager:
             detail_module = import_module("contactsync.device_detail")
             app.add_api_route(detail_path, getattr(detail_module, "device_detail_page"), methods=["GET"], response_class=getattr(detail_module, "HTMLResponse"), tags=["devices-ui"])
 
-        # Platform routes are centralized above. Plugin hooks may still add
-        # connector-specific routes, but a connector must never own global API
-        # registration.
         for plugin in self.all():
             attach_routes = getattr(plugin, "attach_routes", None)
             if callable(attach_routes):
@@ -126,7 +129,6 @@ _MANAGER: PluginManager | None = None
 def get_plugin_manager() -> PluginManager:
     global _MANAGER
     if _MANAGER is None:
-        # Publish before route imports to make recursive manager lookups safe.
         _MANAGER = PluginManager()
     manager = _MANAGER
     if not manager._routes_attached:
@@ -135,8 +137,8 @@ def get_plugin_manager() -> PluginManager:
 
 
 def ensure_platform_routes() -> None:
-    """Explicit startup hook used after main.app is fully constructed."""
-    get_plugin_manager().attach_plugin_routes()
+    """Final route pass after main.app is fully constructed."""
+    get_plugin_manager().attach_plugin_routes(force=True)
 
 
 def connector_definitions() -> dict[str, dict]:
