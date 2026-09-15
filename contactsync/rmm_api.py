@@ -127,6 +127,49 @@ def list_devices(
         return [dict(row) for row in connection.execute(sql, params)]
 
 
+@router.post("/import", status_code=201)
+def import_device(payload: DeviceImport) -> dict[str, Any]:
+    data = payload.model_dump()
+    data["raw_json"] = json.dumps(data, ensure_ascii=False)
+    event_payload = {
+        "source": data["source"], "external_id": data["external_id"],
+        "hostname": data["hostname"], "customer_number": data.get("customer_number"),
+        "online_status": data["online_status"],
+    }
+    with _db() as connection:
+        device_id, events = upsert_device(connection, data)
+        _store_device_events(connection, device_id, events, event_payload)
+        connection.commit()
+        device = dict(_device_or_404(connection, device_id))
+    _publish_automation_events(device_id, events, event_payload)
+    return {"device": device, "events": events}
+
+
+# Register the more specific GLPI sub-resource before the generic /{device_id}
+# route. This keeps route resolution deterministic across Starlette/FastAPI versions.
+@router.patch("/{device_id}/glpi")
+def link_glpi_asset(device_id: int, payload: GLPILink) -> dict[str, Any]:
+    with _db() as connection:
+        _device_or_404(connection, device_id)
+        connection.execute(
+            "UPDATE managed_devices SET glpi_asset_id=?,updated_at=? WHERE id=?",
+            (payload.glpi_asset_id, now_iso(), device_id),
+        )
+        connection.commit()
+        return dict(_device_or_404(connection, device_id))
+
+
+@router.delete("/{device_id}/glpi")
+def unlink_glpi_asset(device_id: int) -> dict[str, Any]:
+    with _db() as connection:
+        _device_or_404(connection, device_id)
+        connection.execute(
+            "UPDATE managed_devices SET glpi_asset_id=NULL,updated_at=? WHERE id=?", (now_iso(), device_id)
+        )
+        connection.commit()
+        return dict(_device_or_404(connection, device_id))
+
+
 @router.get("/{device_id}")
 def get_device(device_id: int) -> dict[str, Any]:
     with _db() as connection:
@@ -149,44 +192,3 @@ def get_device(device_id: int) -> dict[str, Any]:
         else:
             device["monitoring_services"] = []
         return device
-
-
-@router.post("/import", status_code=201)
-def import_device(payload: DeviceImport) -> dict[str, Any]:
-    data = payload.model_dump()
-    data["raw_json"] = json.dumps(data, ensure_ascii=False)
-    event_payload = {
-        "source": data["source"], "external_id": data["external_id"],
-        "hostname": data["hostname"], "customer_number": data.get("customer_number"),
-        "online_status": data["online_status"],
-    }
-    with _db() as connection:
-        device_id, events = upsert_device(connection, data)
-        _store_device_events(connection, device_id, events, event_payload)
-        connection.commit()
-        device = dict(_device_or_404(connection, device_id))
-    _publish_automation_events(device_id, events, event_payload)
-    return {"device": device, "events": events}
-
-
-@router.patch("/{device_id}/glpi")
-def link_glpi_asset(device_id: int, payload: GLPILink) -> dict[str, Any]:
-    with _db() as connection:
-        _device_or_404(connection, device_id)
-        connection.execute(
-            "UPDATE managed_devices SET glpi_asset_id=?,updated_at=? WHERE id=?",
-            (payload.glpi_asset_id, now_iso(), device_id),
-        )
-        connection.commit()
-        return dict(_device_or_404(connection, device_id))
-
-
-@router.delete("/{device_id}/glpi")
-def unlink_glpi_asset(device_id: int) -> dict[str, Any]:
-    with _db() as connection:
-        _device_or_404(connection, device_id)
-        connection.execute(
-            "UPDATE managed_devices SET glpi_asset_id=NULL,updated_at=? WHERE id=?", (now_iso(), device_id)
-        )
-        connection.commit()
-        return dict(_device_or_404(connection, device_id))
