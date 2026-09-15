@@ -38,11 +38,15 @@ class GLPILink(BaseModel):
 def _db() -> sqlite3.Connection:
     """Open the one canonical ContactSync database.
 
-    RMM used to import contactsync.main.DB_PATH directly while automation and
-    monitoring used contactsync.database.  During test collection/import-order
-    changes those paths could diverge.  All RMM reads and writes now go through
-    the central database provider.
+    main.py is still the application bootstrap for 3.5.x and resolves the
+    deployment/test paths first.  Synchronize the central provider with those
+    paths before opening the RMM connection.  This removes the remaining
+    import-order split where customer writes and RMM reads could use different
+    SQLite files.
     """
+    from contactsync import main as application
+
+    database.configure(directory=application.DATA_DIR, database=application.DB_PATH)
     connection = database.connect(timeout=30)
     init_rmm_schema(connection)
     init_monitoring_schema(connection)
