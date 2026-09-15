@@ -17,6 +17,7 @@ BUILTIN_PLUGINS = (
 )
 
 PLATFORM_ROUTES = (
+    ("contactsync.dashboard_page", "/"),
     ("contactsync.rmm_api", "/api/v1/devices/{device_id}/glpi"),
     ("contactsync.netlock_api", "/api/v1/netlock/import-devices"),
     ("contactsync.security_api", "/api/v1/auth/login"),
@@ -52,20 +53,19 @@ class PluginManager:
             self.register(item.load()())
 
     def attach_plugin_routes(self, *, force: bool = False) -> None:
-        """Attach platform routes only after ``main.app`` is usable.
-
-        Route attachment is deliberately not triggered by ordinary manager
-        lookups.  Connector imports can recursively ask for the manager while
-        ``main`` is still being imported; attaching at that point produced an
-        incomplete FastAPI route table (notably NetLock and the GLPI link
-        endpoint).  ``ensure_platform_routes`` performs the final pass.
-        """
+        """Attach platform routes only after ``main.app`` is usable."""
         if self._routes_attached and not force:
             return
         try:
             from contactsync.main import app
         except (ImportError, AttributeError):
             return
+
+        # main.py historically contains a minimal placeholder at /. Replace
+        # only that endpoint; all API and UI routes remain untouched.
+        for route in list(app.routes):
+            if getattr(route, "path", "") == "/" and getattr(route, "name", "") == "root":
+                app.routes.remove(route)
 
         for module_name, marker_path in PLATFORM_ROUTES:
             if any(getattr(route, "path", "") == marker_path for route in app.routes):
@@ -89,8 +89,6 @@ class PluginManager:
                 tags=["devices-ui"],
             )
 
-        # Connector hooks are retained for connector-specific extensions. They
-        # run only during the final application registration pass.
         for plugin in self.all():
             attach_routes = getattr(plugin, "attach_routes", None)
             if callable(attach_routes):
@@ -138,8 +136,6 @@ _MANAGER: PluginManager | None = None
 def get_plugin_manager() -> PluginManager:
     global _MANAGER
     if _MANAGER is None:
-        # Publishing the manager is safe during recursive imports; route
-        # registration is intentionally deferred until main is complete.
         _MANAGER = PluginManager()
     return _MANAGER
 
