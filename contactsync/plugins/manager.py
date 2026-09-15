@@ -16,6 +16,18 @@ BUILTIN_PLUGINS = (
     "contactsync.plugins.checkmk_plugin:CheckmkPlugin",
 )
 
+PLATFORM_ROUTES = (
+    ("contactsync.rmm_api", "/api/v1/devices"),
+    ("contactsync.netlock_api", "/api/v1/netlock/import-devices"),
+    ("contactsync.security_api", "/api/v1/auth/login"),
+    ("contactsync.field_mapping_api", "/api/v1/field-mappings"),
+    ("contactsync.device_page", "/devices"),
+    ("contactsync.customer_overview", "/api/v1/customers/{customer_id}/overview"),
+    ("contactsync.incidents_page", "/api/v1/incidents"),
+    ("contactsync.automation_page", "/api/v1/automation/monitoring"),
+    ("contactsync.connector_status", "/api/v1/connectors/status"),
+)
+
 
 class PluginManager:
     def __init__(self, specs: Iterable[str] | None = None) -> None:
@@ -37,24 +49,47 @@ class PluginManager:
         except TypeError:
             discovered = entry_points().get("contactsync.plugins", [])
         for item in discovered:
-            plugin_obj = item.load()()
-            self.register(plugin_obj)
+            self.register(item.load()())
 
     def attach_plugin_routes(self) -> None:
-        """Attach plugin route hooks once, after the global manager exists.
-
-        Route hooks are intentionally not executed from __init__.  Some hooks
-        import contactsync.main, which in turn calls get_plugin_manager().
-        Running them during construction can therefore recurse into a second
-        manager or leave FastAPI routes only partially registered.
-        """
+        """Attach platform and plugin routes once the global manager exists."""
         if self._routes_attached:
             return
-        self._routes_attached = True
+        try:
+            from contactsync.main import app
+        except (ImportError, AttributeError):
+            return
+
+        # Platform routes are owned by ContactSync, not by the NetLock plugin.
+        # This also makes their registration deterministic when a plugin hook
+        # cannot be imported during application startup.
+        for module_name, marker_path in PLATFORM_ROUTES:
+            if any(getattr(route, "path", "") == marker_path for route in app.routes):
+                continue
+            router = getattr(import_module(module_name), "router")
+            app.include_router(router)
+
+        if not getattr(app.state, "security_guard_installed", False):
+            guard = getattr(import_module("contactsync.security_guard"), "SecurityGuardMiddleware")
+            app.add_middleware(guard)
+            app.state.security_guard_installed = True
+
+        detail_path = "/devices/{device_id}"
+        if not any(getattr(route, "path", "") == detail_path for route in app.routes):
+            detail_module = import_module("contactsync.device_detail")
+            app.add_api_route(
+                detail_path,
+                getattr(detail_module, "device_detail_page"),
+                methods=["GET"],
+                response_class=getattr(detail_module, "HTMLResponse"),
+                tags=["devices-ui"],
+            )
+
         for plugin in self.all():
             attach_routes = getattr(plugin, "attach_routes", None)
             if callable(attach_routes):
                 attach_routes()
+        self._routes_attached = True
 
     def register(self, plugin: ConnectorPlugin) -> None:
         key = plugin.metadata.key
@@ -97,11 +132,12 @@ _MANAGER: PluginManager | None = None
 def get_plugin_manager() -> PluginManager:
     global _MANAGER
     if _MANAGER is None:
-        # Publish the fully constructed manager before any route hook imports
-        # contactsync.main and asks for the manager again.
         manager = PluginManager()
         _MANAGER = manager
-        manager.attach_plugin_routes()
+    # Route attachment is retried until main.app is fully available. This is
+    # safe because attach_plugin_routes is idempotent.
+    if not _MANAGER._routes_attached:
+        _MANAGER.attach_plugin_routes()
     return _MANAGER
 
 
