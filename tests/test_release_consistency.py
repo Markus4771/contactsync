@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_version_metadata_is_consistent():
     version = (ROOT / "version.txt").read_text(encoding="utf-8").strip()
-    assert version == "3.5.1"
+    assert version == "3.5.4"
 
     init_text = (ROOT / "contactsync" / "__init__.py").read_text(encoding="utf-8")
     match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
@@ -44,3 +44,15 @@ def test_monitoring_release_contract():
     assert (ROOT / "contactsync" / "plugins" / "checkmk_runtime.py").is_file()
     assert (ROOT / "contactsync" / "plugins" / "checkmk_plugin.py").is_file()
     assert (ROOT / "tests" / "test_monitoring.py").is_file()
+
+
+def test_354_security_and_upgrade_release_contract():
+    manifest = (ROOT / "projekt.yaml").read_text(encoding="utf-8")
+    assert "security_hardening: true" in manifest
+    assert "encrypted_connector_secrets: true" in manifest
+    assert "role_based_access: true" in manifest
+    assert "csrf_protection: true" in manifest
+    assert "signed_webhooks: true" in manifest
+    assert "upgrade_database_backup: true" in manifest
+    assert (ROOT / "tests" / "test_security.py").is_file()
+    assert (ROOT / "tests" / "test_upgrade_compatibility.py").is_file()

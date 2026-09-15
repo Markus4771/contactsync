@@ -1,7 +1,7 @@
 schema: itpz/v1
 id: contactsync-professional
 name: ContactSync Professional
-version: 3.5.1
+version: 3.5.4
 type: deb
 channel: stable
 description: Modulare Kontakt- und Verzeichniszentrale mit Plugin-Architektur fuer zentrale Kunden-, Ansprechpartner- und Geraetedaten.
@@ -9,8 +9,8 @@ category: Kommunikation
 homepage: https://github.com/Markus4771/contactsync
 package:
   name: contactsync-professional
-  asset: contactsync-professional_3.5.1_all.deb
-  sha256_asset: contactsync-professional_3.5.1_all.deb.sha256
+  asset: contactsync-professional_3.5.4_all.deb
+  sha256_asset: contactsync-professional_3.5.4_all.deb.sha256
 source:
   provider: github
   repository: Markus4771/contactsync
@@ -51,6 +51,12 @@ metadata:
   incident_overview: true
   monitoring_automation_ui: true
   connector_status_ui: true
+  security_hardening: true
+  encrypted_connector_secrets: true
+  role_based_access: true
+  csrf_protection: true
+  signed_webhooks: true
+  upgrade_database_backup: true
   connector_registry: plugin-manager
   plugin_interface: async-v1
   odoo_transport: json-rpc

@@ -4,9 +4,9 @@ Modulare Kontakt-, Kunden-, Geräte- und Automatisierungszentrale für Debian mi
 
 ## Aktueller Entwicklungsstand
 
-**Version 3.5.4 – Test-/Entwicklungsstand**
+**Version 3.5.4 – Release-Kandidat im Testkanal**
 
-Der Branch `agent/3.5.4-security` enthält den aktuellen Entwicklungsstand von ContactSync Professional 3.5.4. Dieser Stand ist für Testsysteme vorgesehen und noch nicht für den Produktivbetrieb freigegeben.
+Der Branch `agent/3.5.4-security` enthält den aktuellen 3.5.4-Release-Kandidaten. Security-, Migrations- und Paket-Regressionstests laufen automatisiert unter Python 3.11 und 3.12; der Debian-Paket-Build wird ebenfalls über GitHub Actions geprüft. Vor der Freigabe für den Produktivbetrieb steht noch der abschließende reale Upgrade-Test auf dem Debian-Testserver sowie die Übernahme nach `main` aus.
 
 ## Installation auf Debian direkt über GitHub
 
@@ -35,27 +35,30 @@ chmod +x install.sh
 sudo ./install.sh --test
 ```
 
-`--test` installiert den Branch `agent/3.5.4-security`. Das Skript lädt die Anwendung vollständig von GitHub, installiert die benötigten Debian-Pakete und Python-Abhängigkeiten, richtet den systemd-Dienst ein, startet ContactSync und führt abschließend einen Health-Check durch.
+`--test` installiert den Branch `agent/3.5.4-security`. Das Skript lädt die Anwendung vollständig von GitHub, installiert die benötigten Debian-Pakete und Python-Abhängigkeiten, richtet Webdienst und Automation-Worker ein, startet beide Dienste und führt abschließend einen Health-Check durch.
 
 Installationspfade:
 
 - Anwendung: `/opt/contactsync-professional`
 - Datenbank und persistente Daten: `/var/lib/contactsync-professional`
-- systemd-Dienst: `contactsync-professional.service`
+- Webdienst: `contactsync-professional.service`
+- Automation-Worker: `contactsync-automation.service`
 
-Bei einer erneuten Installation bleiben die persistenten Daten unter `/var/lib/contactsync-professional` erhalten.
+Bei einer erneuten Installation bleiben die persistenten Daten unter `/var/lib/contactsync-professional` erhalten. Existiert bereits eine SQLite-Datenbank, legt der Installer vor dem Upgrade zusätzlich `/var/lib/contactsync-professional/contactsync.db.pre-upgrade` an. Der vorherige Programmstand wird erst nach einem erfolgreichen Healthcheck entfernt und kann bei einem Installations- oder Startfehler automatisch wiederhergestellt werden.
 
 ### Installation prüfen
 
 ```bash
 systemctl status contactsync-professional.service
+systemctl status contactsync-automation.service
 curl http://127.0.0.1:8000/health
 ```
 
-Protokoll anzeigen:
+Protokolle anzeigen:
 
 ```bash
 journalctl -u contactsync-professional.service -n 100 --no-pager
+journalctl -u contactsync-automation.service -n 100 --no-pager
 ```
 
 Die Weboberfläche ist standardmäßig erreichbar unter:
@@ -74,7 +77,7 @@ chmod +x install.sh
 sudo ./install.sh --test
 ```
 
-Vor Updates eines Systems mit wichtigen Daten sollte `/var/lib/contactsync-professional` gesichert werden.
+Der Installer erstellt bei vorhandener Datenbank automatisch das oben genannte Pre-Upgrade-Backup. Bei wichtigen Systemen wird trotzdem eine zusätzliche Sicherung des gesamten Verzeichnisses `/var/lib/contactsync-professional` empfohlen.
 
 ### Stable-Version
 
@@ -84,7 +87,7 @@ Der Installer unterstützt auch den Stable-Kanal:
 sudo ./install.sh --stable
 ```
 
-`--stable` installiert den Stand aus `main`. Solange 3.5.4 noch nicht freigegeben und nach `main` übernommen wurde, ist für Tests ausdrücklich `--test` zu verwenden.
+`--stable` installiert den Stand aus `main`. Solange 3.5.4 noch nicht nach `main` übernommen und als Release veröffentlicht wurde, ist für den Release-Kandidaten ausdrücklich `--test` zu verwenden.
 
 ### Bestimmten Branch oder Tag installieren
 
@@ -92,7 +95,7 @@ sudo ./install.sh --stable
 sudo ./install.sh --ref BRANCH_ODER_TAG
 ```
 
-Nach einer späteren 3.5.4-Freigabe kann beispielsweise ein entsprechender Release-Tag gezielt installiert werden.
+Nach der 3.5.4-Freigabe kann beispielsweise der Release-Tag gezielt installiert werden.
 
 ### Fehlersuche
 
@@ -100,28 +103,38 @@ Falls der automatische Health-Check fehlschlägt:
 
 ```bash
 systemctl --no-pager --full status contactsync-professional.service
+systemctl --no-pager --full status contactsync-automation.service
 journalctl -u contactsync-professional.service -n 100 --no-pager
+journalctl -u contactsync-automation.service -n 100 --no-pager
 curl -v http://127.0.0.1:8000/health
 ```
 
 ## Enthaltene Funktionen
 
-- FastAPI-Anwendung mit Weboberfläche
-- SQLite-Datenbank mit automatischer Initialisierung
+- FastAPI-Anwendung mit ContactSync-Weboberfläche
+- SQLite-Datenbank mit automatischer Initialisierung und migrationssicherem Bestandsdatenpfad
 - versionierte REST-API unter `/api/v1`
 - Health-Check unter `/health`
-- Kunden- und Ansprechpartnerverwaltung
+- Kunden- und Ansprechpartnerverwaltung mit Kundennummern
 - zentrale Connector-Registry und Plugin-Architektur
-- Connectoren unter anderem für Nextcloud, Zammad, Odoo und 3CX
-- Geräte-/RMM- und Monitoring-Ausbau mit NetLock RMM und Checkmk
+- Connectoren für Odoo, Zammad, Nextcloud, 3CX und GLPI
+- Geräte-/RMM-Ausbau mit NetLock RMM
+- Monitoring mit Checkmk
 - Synchronisations- und Automatisierungsfunktionen
-- systemd-Dienst
+- Webdienst und separater Automation-Worker über systemd
 - Debian-Paket-Build über GitHub Actions
-- Sicherheitsfunktionen in 3.5.4: Session-Authentifizierung, Rollen, CSRF-Schutz und verschlüsselte Connector-Zugangsdaten
+- Session-Authentifizierung und Rollen Admin/Operator/Viewer
+- erzwungener Passwortwechsel für den Bootstrap-Administrator
+- CSRF-Schutz für schreibende Aktionen
+- verschlüsselte und maskierte Connector-Zugangsdaten
+- HMAC-signierte Webhooks
+- automatisierte Regressionstests für ein Upgrade vorhandener 3.3.x-Kunden- und Ansprechpartnerdaten
 
 ## Wichtiger Hinweis zu 3.5.4
 
-3.5.4 befindet sich noch in der Fertigstellung. Der Debian-Paket-Build funktioniert bereits, die vollständige Testsuite ist jedoch noch nicht grün. Der aktuelle Teststand sollte deshalb zunächst nur auf einem Testserver eingesetzt werden. Produktive Zugangsdaten sollten erst nach Abschluss der Security- und Integrationstests verwendet werden.
+Der 3.5.4-Stand hat die automatisierten Security-, Upgrade- und Paketprüfungen vor dem finalen Versions-Bump erfolgreich durchlaufen. Nach dem Versions-Bump wird derselbe Stand nochmals vollständig in CI geprüft. Bis zusätzlich der reale Upgrade-Test auf dem vorgesehenen Debian-Testserver abgeschlossen, PR #16 freigegeben und nach `main` übernommen wurde, bleibt 3.5.4 ein Release-Kandidat und sollte nicht als produktiv freigegeben betrachtet werden.
+
+NetLock Public API ist vorbereitet, aber noch nicht mit realen Benutzer-Credentials verifiziert. 3CX Company Phonebook Write bleibt ohne verifizierten offiziellen Endpoint bewusst deaktiviert.
 
 ## Entwicklung
 

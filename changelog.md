@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.5.4
+
+- Security-Hardening für Webzugriff, REST-API und Connector-Konfiguration vervollständigt.
+- Connector-Zugangsdaten werden mit Fernet verschlüsselt gespeichert; vorhandene Klartextwerte werden migriert und API-Ausgaben maskieren sensible Werte.
+- Session-Authentifizierung, CSRF-Schutz und Rollenmodell mit Viewer, Operator und Administrator serverseitig abgesichert.
+- Bootstrap-Administrator `admin/admin123` für Neuinstallationen beibehalten und mit erzwungenem Passwortwechsel abgesichert.
+- Benutzerverwaltung um Rollenprüfung, Konflikterkennung, Selbst-Deaktivierungsschutz und Session-Invalidierung bei Benutzerdeaktivierung abgesichert.
+- Signierte Webhooks mit HMAC-SHA256 für externe Automatisierungen ergänzt.
+- Security-, Auth-, Rollen-, Session-, CSRF-, Secret- und Webhook-Regressionstests vervollständigt.
+- Reproduzierbaren Upgrade-Test für bestehende 3.3.x-Daten ergänzt; Kundennummern, Kunden und Ansprechpartner bleiben erhalten und Legacy-Kontakte werden idempotent migriert.
+- GitHub-Installer gegen den beim Upgrade gefundenen Virtualenv-/Shebang-Fehler gehärtet; das Venv wird am endgültigen Installationspfad erstellt und die Console-Entry-Points werden geprüft.
+- Installer stoppt Webdienst und Automation-Worker kontrolliert, legt vor dem Upgrade eine SQLite-Sicherheitskopie an und verwirft den vorherigen Programmstand erst nach erfolgreichem Healthcheck.
+- Rollback stellt bei Installations-, Start- oder Healthcheck-Fehlern den vorherigen Programmstand wieder her; das Datenbank-Upgrade-Backup bleibt erhalten.
+- Systemzentrale als ContactSync-Startseite wiederhergestellt und bestehendes GUI-Design beibehalten.
+- Release-, Debian-Paket- und IT-Projektzentrale-Metadaten auf 3.5.4 vereinheitlicht.
+- Automatisierte Tests unter Python 3.11 und 3.12 sowie der Debian-Paket-Build waren vor dem finalen Versions-Bump grün; der finale Release-Stand wird nach diesem Bump erneut durch CI geprüft.
+- NetLock-Livetransport bleibt bis zur Verifikation mit realen Benutzer-Credentials als `pending-verification` gekennzeichnet.
+- 3CX Company Phonebook Write bleibt ohne verifizierten offiziellen Endpoint bewusst nicht implementiert.
+
 ## 3.5.1
 
 - Kundenübersicht um Ansprechpartner, zugeordnete Geräte und zusammengefasste RMM-/Checkmk-Zustände erweitert.
