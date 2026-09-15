@@ -35,6 +35,8 @@ class GLPILink(BaseModel):
 
 
 def _db() -> sqlite3.Connection:
+    # main owns the application database path for the lifetime of the process.
+    # All RMM operations deliberately use exactly that database.
     from contactsync.main import DB_PATH, DATA_DIR
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
@@ -107,9 +109,11 @@ def list_devices(
     sql = _device_list_sql()
     params: list[Any] = []
     if customer_number:
-        # customer_id is the canonical relation. Keep the denormalized number
-        # as a fallback for devices imported before the customer existed.
-        sql += " AND (c.customer_number=? OR (c.id IS NULL AND d.customer_number=?))"
+        # A managed device retains the customer number received from the RMM.
+        # customer_id is the normalized relation when the customer already
+        # exists. Accept either representation so imports remain queryable
+        # during/after customer reconciliation and legacy migrations.
+        sql += " AND (d.customer_number=? OR c.customer_number=?)"
         params.extend([customer_number, customer_number])
     if online_status:
         sql += " AND d.online_status=?"
@@ -147,8 +151,6 @@ def import_device(payload: DeviceImport) -> dict[str, Any]:
     return {"device": device, "events": events}
 
 
-# Register the more specific GLPI sub-resource before the generic /{device_id}
-# route. This keeps route resolution deterministic across Starlette/FastAPI versions.
 @router.patch("/{device_id}/glpi")
 def link_glpi_asset(device_id: int, payload: GLPILink) -> dict[str, Any]:
     with _db() as connection:
