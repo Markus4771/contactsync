@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -50,15 +51,10 @@ def init_auth_schema() -> None:
 
 
 def _bootstrap_password_hash(password: str) -> str:
-    """Hash the legacy first-login password without weakening normal policy.
-
-    hash_password deliberately rejects passwords shorter than ten characters.
-    The historical admin/admin123 credential is accepted only here and is
-    always marked for mandatory replacement after the first login.
-    """
+    """Hash only the historical first-login password using the normal storage format."""
     salt = secrets.token_bytes(16)
     derived = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
-    return f"scrypt$16384$8$1${salt.hex()}${derived.hex()}"
+    return "scrypt$v1$" + base64.urlsafe_b64encode(salt).decode("ascii") + "$" + base64.urlsafe_b64encode(derived).decode("ascii")
 
 
 def ensure_bootstrap_admin() -> bool:
@@ -76,8 +72,7 @@ def ensure_bootstrap_admin() -> bool:
 
 
 def create_user(username: str, password: str, role: str = "viewer", *, must_change_password: bool = False) -> int:
-    init_auth_schema()
-    username = username.strip()
+    init_auth_schema(); username = username.strip()
     if not username:
         raise ValueError("Benutzername darf nicht leer sein")
     if role not in ROLES:
@@ -105,16 +100,9 @@ def _digest(token: str) -> str:
 
 
 def create_session(user_id: int) -> tuple[str, str]:
-    init_auth_schema()
-    token = secrets.token_urlsafe(48)
-    csrf = secrets.token_urlsafe(32)
-    stamp = datetime.now(timezone.utc)
-    expires = stamp + timedelta(hours=SESSION_HOURS)
+    init_auth_schema(); token = secrets.token_urlsafe(48); csrf = secrets.token_urlsafe(32); stamp = datetime.now(timezone.utc); expires = stamp + timedelta(hours=SESSION_HOURS)
     with connect() as connection:
-        connection.execute(
-            "INSERT INTO sessions(user_id,token_hash,csrf_token,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?,?)",
-            (user_id, _digest(token), csrf, expires.isoformat(), stamp.isoformat(), stamp.isoformat()),
-        )
+        connection.execute("INSERT INTO sessions(user_id,token_hash,csrf_token,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?,?)", (user_id, _digest(token), csrf, expires.isoformat(), stamp.isoformat(), stamp.isoformat()))
     return token, csrf
 
 
@@ -123,12 +111,7 @@ def get_session(token: str | None) -> dict[str, Any] | None:
         return None
     init_auth_schema()
     with connect() as connection:
-        row = connection.execute(
-            """SELECT s.id session_id,s.csrf_token,s.expires_at,u.id user_id,u.username,u.role,u.must_change_password
-               FROM sessions s JOIN users u ON u.id=s.user_id
-               WHERE s.token_hash=? AND u.enabled=1""",
-            (_digest(token),),
-        ).fetchone()
+        row = connection.execute("""SELECT s.id session_id,s.csrf_token,s.expires_at,u.id user_id,u.username,u.role,u.must_change_password FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND u.enabled=1""", (_digest(token),)).fetchone()
         if not row or row["expires_at"] <= now_iso():
             if row:
                 connection.execute("DELETE FROM sessions WHERE id=?", (row["session_id"],))
