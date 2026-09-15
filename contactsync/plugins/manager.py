@@ -23,6 +23,10 @@ class PluginManager:
         for spec in specs or BUILTIN_PLUGINS:
             self.register(self._load_spec(spec))
         self._load_external_plugins()
+        # Route hooks must run only after all plugins have been instantiated.
+        # This avoids partially initialized contactsync.main imports during
+        # plugin construction (notably the NetLock device-detail routes).
+        self._attach_plugin_routes()
 
     @staticmethod
     def _load_spec(spec: str) -> ConnectorPlugin:
@@ -38,6 +42,12 @@ class PluginManager:
         for item in discovered:
             plugin_obj = item.load()()
             self.register(plugin_obj)
+
+    def _attach_plugin_routes(self) -> None:
+        for plugin in self.all():
+            attach_routes = getattr(plugin, "attach_routes", None)
+            if callable(attach_routes):
+                attach_routes()
 
     def register(self, plugin: ConnectorPlugin) -> None:
         key = plugin.metadata.key
