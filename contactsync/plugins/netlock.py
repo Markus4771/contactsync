@@ -30,6 +30,7 @@ class NetLockRMMPlugin(ConnectorPlugin):
     @staticmethod
     def _attach_routes() -> None:
         try:
+            from contactsync.automation_page import router as automation_router
             from contactsync.customer_overview import router as customer_router
             from contactsync.device_detail import router as detail_router
             from contactsync.device_page import router as page_router
@@ -48,6 +49,8 @@ class NetLockRMMPlugin(ConnectorPlugin):
             app.include_router(customer_router)
         if not any(getattr(route, "path", "") == "/api/v1/incidents" for route in app.routes):
             app.include_router(incidents_router)
+        if not any(getattr(route, "path", "") == "/api/v1/automation/monitoring" for route in app.routes):
+            app.include_router(automation_router)
 
     def connection_hint(self) -> str:
         return "NetLock Server-URL und API-Token eintragen. API-Endpunkte werden erst nach Verifikation aktiviert."
