@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 from contactsync.plugins.base import ConnectorPlugin, PluginMetadata
@@ -30,30 +31,27 @@ class NetLockRMMPlugin(ConnectorPlugin):
     @staticmethod
     def _attach_routes() -> None:
         try:
-            from contactsync.automation_page import router as automation_router
-            from contactsync.connector_status import router as connector_status_router
-            from contactsync.customer_overview import router as customer_router
-            from contactsync.device_detail import router as detail_router
-            from contactsync.device_page import router as page_router
-            from contactsync.incidents_page import router as incidents_router
             from contactsync.main import app
-            from contactsync.rmm_api import router as api_router
-        except ImportError:
+        except (ImportError, AttributeError):
             return
-        if not any(getattr(route, "path", "") == "/api/v1/devices" for route in app.routes):
-            app.include_router(api_router)
-        if not any(getattr(route, "path", "") == "/devices" for route in app.routes):
-            app.include_router(page_router)
-        if not any(getattr(route, "path", "") == "/devices/{device_id}" for route in app.routes):
-            app.include_router(detail_router)
-        if not any(getattr(route, "path", "") == "/api/v1/customers/{customer_id}/overview" for route in app.routes):
-            app.include_router(customer_router)
-        if not any(getattr(route, "path", "") == "/api/v1/incidents" for route in app.routes):
-            app.include_router(incidents_router)
-        if not any(getattr(route, "path", "") == "/api/v1/automation/monitoring" for route in app.routes):
-            app.include_router(automation_router)
-        if not any(getattr(route, "path", "") == "/api/v1/connectors/status" for route in app.routes):
-            app.include_router(connector_status_router)
+
+        route_modules = (
+            ("contactsync.rmm_api", "/api/v1/devices"),
+            ("contactsync.device_page", "/devices"),
+            ("contactsync.device_detail", "/devices/{device_id}"),
+            ("contactsync.customer_overview", "/api/v1/customers/{customer_id}/overview"),
+            ("contactsync.incidents_page", "/api/v1/incidents"),
+            ("contactsync.automation_page", "/api/v1/automation/monitoring"),
+            ("contactsync.connector_status", "/api/v1/connectors/status"),
+        )
+        for module_name, marker_path in route_modules:
+            if any(getattr(route, "path", "") == marker_path for route in app.routes):
+                continue
+            try:
+                router = getattr(import_module(module_name), "router")
+            except (ImportError, AttributeError):
+                continue
+            app.include_router(router)
 
     def connection_hint(self) -> str:
         return "NetLock Server-URL und API-Token eintragen. API-Endpunkte werden erst nach Verifikation aktiviert."
