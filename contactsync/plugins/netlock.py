@@ -26,10 +26,13 @@ class NetLockRMMPlugin(ConnectorPlugin):
     )
 
     def __init__(self) -> None:
-        self._attach_routes()
+        # Route registration is deliberately deferred to PluginManager after
+        # all plugins are initialized. Importing contactsync.main here can see
+        # a partially initialized module and omit routes on the first startup.
+        pass
 
     @staticmethod
-    def _attach_routes() -> None:
+    def attach_routes() -> None:
         try:
             from contactsync.main import app
         except (ImportError, AttributeError):
