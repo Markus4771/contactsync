@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from contactsync.automation_core import connect, init_schema
+import contactsync.automation_core as automation_core
 from contactsync.automation_scheduler import MONITORING_EVENTS, configure_monitoring_webhook
 
 router = APIRouter(tags=["automation-ui"])
@@ -18,8 +18,10 @@ def _esc(value: Any) -> str:
 
 
 def automation_status() -> dict[str, Any]:
-    init_schema()
-    with connect() as connection:
+    # Resolve the automation DB helpers at call time. This is important for
+    # tests and deployments that override CONTACTSYNC_DB after module import.
+    automation_core.init_schema()
+    with automation_core.connect() as connection:
         targets = [dict(row) for row in connection.execute(
             "SELECT id,name,url,events_json,enabled,updated_at FROM webhook_targets ORDER BY name"
         )]
