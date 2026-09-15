@@ -1,18 +1,5 @@
 # Changelog
 
-## 3.5.4
-
-- Security-Hardening für den Webzugriff und die Connector-Konfiguration ergänzt.
-- Connector-Zugangsdaten werden verschlüsselt gespeichert; bestehende Klartextwerte werden beim Laden migriert.
-- API-Ausgaben maskieren sensible Konfigurationswerte und geben keine Secrets mehr zurück.
-- Rollenmodell mit Viewer, Operator und Administrator sowie serverseitigen Berechtigungsprüfungen ergänzt.
-- Session-Authentifizierung und CSRF-Schutz für schreibende Web- und API-Aktionen ergänzt.
-- Signierte Webhooks mit konfigurierbarem Shared Secret für externe Automatisierungen ergänzt.
-- Security-Middleware und zentrale Schutzfunktionen für sensible Routen integriert.
-- NetLock-, Geräte-, Feldmapping- und Automatisierungsrouten an das neue Sicherheitsmodell angepasst.
-- Regressionstests für Authentifizierung, Rollen, Secrets, CSRF, Webhook-Signaturen und Release-Konsistenz ergänzt.
-- Release-, Python-Paket- und IT-Projektzentrale-Metadaten auf 3.5.4 aktualisiert.
-
 ## 3.5.1
 
 - Kundenübersicht um Ansprechpartner, zugeordnete Geräte und zusammengefasste RMM-/Checkmk-Zustände erweitert.
