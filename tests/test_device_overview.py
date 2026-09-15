@@ -1,10 +1,16 @@
+import os
 import sqlite3
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from contactsync.auth import create_user
 from contactsync.main import DB_PATH, app, init_db
 from contactsync.monitoring_core import init_monitoring_schema, refresh_service_counters, upsert_host, upsert_service
 from contactsync.rmm_core import init_rmm_schema
+
+TEST_USER = "device-admin"
+TEST_PASSWORD = "ContactSync-Device-Admin-123!"
 
 
 def _connection():
@@ -14,6 +20,26 @@ def _connection():
     init_rmm_schema(connection)
     init_monitoring_schema(connection)
     return connection
+
+
+def _ensure_test_user():
+    init_db()
+    try:
+        create_user(TEST_USER, TEST_PASSWORD, "administrator")
+    except sqlite3.IntegrityError:
+        pass
+
+
+def _authenticated_client():
+    _ensure_test_user()
+    client = TestClient(app, base_url="https://testserver")
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": TEST_USER, "password": TEST_PASSWORD},
+    )
+    assert response.status_code == 200
+    client.headers.update({"X-CSRF-Token": response.json()["csrf_token"]})
+    return client
 
 
 def test_device_overview_page_is_available():
@@ -27,8 +53,7 @@ def test_device_overview_page_is_available():
 
 
 def test_device_api_combines_customer_rmm_glpi_and_checkmk():
-    init_db()
-    with TestClient(app) as client:
+    with _authenticated_client() as client:
         customer = client.post(
             "/api/v1/customers",
             json={"customer_number": "MON-300", "name": "Monitoring Kunde"},
@@ -64,7 +89,7 @@ def test_device_api_combines_customer_rmm_glpi_and_checkmk():
         refresh_service_counters(connection, host_id)
         connection.commit()
 
-    with TestClient(app) as client:
+    with _authenticated_client() as client:
         listing = client.get("/api/v1/devices", params={"customer_number": "MON-300"})
         assert listing.status_code == 200
         device = next(item for item in listing.json() if item["id"] == device_id)
@@ -83,8 +108,7 @@ def test_device_api_combines_customer_rmm_glpi_and_checkmk():
 
 
 def test_device_monitoring_filter_supports_unmonitored():
-    init_db()
-    with TestClient(app) as client:
+    with _authenticated_client() as client:
         imported = client.post(
             "/api/v1/devices/import",
             json={
